@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>High DPI Canvas Example</title>
+  <style>
+    /* Basic reset */
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overscroll-behavior: none;
+      user-select: none;
+      -webkit-user-select: none; /* Safari needs this */
+      cursor: default;           /* Safari needs this */
+    }
+
+    /* Canvas styling */
+    canvas {
+      width: 100%; /* Make the canvas fill the container width */
+      height: 100%; /* Make the canvas fill the container height */
+      display: block; /* Remove extra space below the canvas */
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <h2 id="cannotInitBanner" style="text-align: center; margin-top: -90vh; display: none">
+    Cannot initialise canvas
+  <h2>
+
+  <script src="./built/define.js"></script>
+  <script src="./built/index.js"></script>
+</body>
+</html>
