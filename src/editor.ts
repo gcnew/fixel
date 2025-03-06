@@ -176,7 +176,8 @@ function drawButton(o: Button<unknown>) {
         ctx.font = o.inner.font;
 
         const dims = ctx.measureText(o.inner.text);
-        ctx.fillText(o.inner.text, o.x + o.w - dims.width - 4, o.y + dims.fontBoundingBoxAscent);
+        const ch = Math.round((o.h - dims.actualBoundingBoxAscent) / 2);
+        ctx.fillText(o.inner.text, o.x + o.w - dims.width - 4 | 0, o.y + dims.actualBoundingBoxAscent + ch | 0);
     }
 
     if (o.inner.kind === 'image') {
@@ -242,7 +243,7 @@ function regenerateUI() {
         return;
     }
 
-    toolSize = gridSize = (width < 600) ? 32 : 64;
+    toolSize = (width < 600) ? 32 : 64;
 
     ctx.imageSmoothingEnabled = false;
     toolOffset = height - (toolSize + 5) * 4 - 5 - 5;
@@ -303,9 +304,9 @@ function onAtlasTileClick(x: ReturnType<typeof createAtlasTiles>[0]) {
 }
 
 function createAtlasList(): Button<undefined>[] {
-    const w = (width < 600) ? 100 : 150;
+    const w = (width < 600) ? 90 : 150;
     const h = (width < 600) ? 12  : 21;
-    const font = (width < 600) ? '10px monospace' : '16px monospace';
+    const font = (width < 600) ? '9px monospace' : '14px monospace';
 
     return atlasPaths.map<Button<undefined>>((path, i) => {
         const text = path
@@ -341,10 +342,10 @@ function onAtlasButtonClick(x: ReturnType<typeof createAtlasList>[0]) {
 }
 
 function createZoomButton(): Button<undefined> {
-    const aw = (width < 600) ? 100 : 150;
-    const w = (width < 600) ? 30 : 50;
+    const aw = (width < 600) ? 90 : 150;
+    const w = (width < 600) ? 35 : 50;
     const h = (width < 600) ? 12  : 21;
-    const font = (width < 600) ? '10px monospace' : '16px monospace';
+    const font = (width < 600) ? '9px monospace' : '14px monospace';
 
     return {
         kind: 'button',
