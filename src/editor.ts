@@ -176,7 +176,7 @@ function drawButton(o: Button<unknown>) {
         ctx.font = o.inner.font;
 
         const dims = ctx.measureText(o.inner.text);
-        ctx.fillText(o.inner.text, o.x + o.w - dims.width - 4, o.y + o.h - 5);
+        ctx.fillText(o.inner.text, o.x + o.w - dims.width - 4, o.y + dims.fontBoundingBoxAscent);
     }
 
     if (o.inner.kind === 'image') {
@@ -242,6 +242,8 @@ function regenerateUI() {
         return;
     }
 
+    toolSize = gridSize = (width < 600) ? 32 : 64;
+
     ctx.imageSmoothingEnabled = false;
     toolOffset = height - (toolSize + 5) * 4 - 5 - 5;
 
@@ -258,7 +260,8 @@ function createAtlasTiles(): Button<{x: number, y: number}>[] {
 
     const aw = atlas.width / sliceSize;
     const ah = atlas.height / sliceSize;
-    const count = ah * aw;
+    const maxTiles = Math.floor((width - 205) / (toolSize + 5)) * 4;
+    const count = Math.min(ah * aw, maxTiles);
 
     const acc = [];
     for (let i = 0; i < count; ++i) {
@@ -300,6 +303,10 @@ function onAtlasTileClick(x: ReturnType<typeof createAtlasTiles>[0]) {
 }
 
 function createAtlasList(): Button<undefined>[] {
+    const w = (width < 600) ? 100 : 150;
+    const h = (width < 600) ? 12  : 21;
+    const font = (width < 600) ? '10px monospace' : '16px monospace';
+
     return atlasPaths.map<Button<undefined>>((path, i) => {
         const text = path
             .replace('img/', '')
@@ -309,16 +316,16 @@ function createAtlasList(): Button<undefined>[] {
             kind: 'button',
             id: path,
             data: undefined,
-            x: width - 150,
-            y: toolOffset + 10 + i * 21,
-            w: 149,
-            h: 21,
+            x: width - w,
+            y: toolOffset + 10 + i * h,
+            w: w - 1,
+            h: h,
             color: 'darkgray',
             borderW: 1,
             inner: {
                 kind: 'text',
                 text,
-                font: '16px monospace',
+                font,
                 get color() {
                     return path === curAtlas ? 'floralwhite' : 'darkgray';
                 }
@@ -334,22 +341,27 @@ function onAtlasButtonClick(x: ReturnType<typeof createAtlasList>[0]) {
 }
 
 function createZoomButton(): Button<undefined> {
+    const aw = (width < 600) ? 100 : 150;
+    const w = (width < 600) ? 30 : 50;
+    const h = (width < 600) ? 12  : 21;
+    const font = (width < 600) ? '10px monospace' : '16px monospace';
+
     return {
         kind: 'button',
         id: 'zoomButton',
         data: undefined,
-        x: width - 200,
+        x: width - aw - w,
         y: toolOffset + 10,
-        w: 45,
-        h: 21,
+        w: w - 5,
+        h,
         color: 'darkgray',
-        borderW: 0,
+        borderW: 1,
         inner: {
             kind: 'text',
             get text() {
                 return 'x' + gridSize;
             },
-            font: '16px monospace',
+            font,
             color: 'darkgray'
         },
         onClick: onZoomButtonClick
