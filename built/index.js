@@ -252,11 +252,11 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
     }
     exports.listen = listen;
     function unlisten(e, f) {
-        eventRegistry[e] = (eventRegistry[e] || []).filter(x => x !== f);
+        eventRegistry[e] = eventRegistry[e]?.filter(x => x !== f); // TYH
     }
     exports.unlisten = unlisten;
     function raise(e) {
-        eventRegistry[e.kind]?.forEach(fn => fn(e));
+        eventRegistry[e.kind]?.forEach(fn => fn(e)); // TYH
     }
     exports.raise = raise;
     function resize() {
@@ -272,6 +272,7 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
             exports.canvas.height = exports.height * window.devicePixelRatio;
             exports.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
         }
+        raise({ kind: 'resize' });
     }
     function keydownListener(e) {
         const code = keyboard_1.KeyMap[e.code] || e.code;
@@ -378,13 +379,16 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
     let loading = true;
     let toolSize = 64;
     let gridSize = 64;
+    let sliceSize = 16;
     let toolOffset;
     let objects = [];
+    let ui = [];
     let curAtlas = 'img/grass.png';
     let currentTile;
     function setup() {
-        (0, engine_1.listen)('mouseup', onClickHandler);
         (0, engine_1.registerShortcuts)(KbShortcuts);
+        (0, engine_1.listen)('mouseup', onClickHandler);
+        (0, engine_1.listen)('resize', regenerateUI);
         engine_1.canvas.addEventListener('contextmenu', e => {
             const x = Math.floor(engine_1.mouseX / gridSize) * gridSize;
             const y = Math.floor(engine_1.mouseY / gridSize) * gridSize;
@@ -395,7 +399,6 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         engine_1.canvas.addEventListener('wheel', e => {
             gridSize = (0, util_2.clamp)(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
         });
-        (0, engine_1.addDebugMsg)(() => '' + toolOffset);
         loadAtlases();
     }
     exports.setup = setup;
@@ -412,27 +415,28 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
                 loadedAtlases[p] = img;
                 if (--leftToLoad === 0) {
                     loading = false;
+                    regenerateUI();
                 }
             };
             img.src = p;
         });
     }
     function draw(dt) {
-        engine_1.ctx.clearRect(0, 0, engine_1.width, engine_1.height);
         if (loading) {
             drawLoading();
             return;
         }
-        toolOffset = engine_1.height - (toolSize + 5) * 4 - 5 - 5;
-        drawAtlas();
-        drawAtlasList();
-        drawZoomLevel();
+        // clear the screen
+        engine_1.ctx.fillStyle = '#000';
+        engine_1.ctx.fillRect(0, 0, engine_1.width, engine_1.height);
+        drawUI();
         drawGrid();
         drawObjects();
         drawCursor();
     }
     exports.draw = draw;
     function drawLoading() {
+        engine_1.ctx.clearRect(0, 0, engine_1.width, engine_1.height);
         engine_1.ctx.fillStyle = '#34495E';
         engine_1.ctx.font = '32px serif';
         const dots = (Date.now() % 1000) / 250 | 0;
@@ -447,53 +451,34 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         for (let y = 0; y < toolOffset; y += gridSize) {
             engine_1.ctx.fillRect(0, y, engine_1.width, 1);
         }
-    }
-    function drawAtlas() {
-        // clear the screen
-        engine_1.ctx.fillStyle = '#000';
-        engine_1.ctx.fillRect(0, 0, engine_1.width, engine_1.height);
-        engine_1.ctx.fillStyle = '#FFF';
-        engine_1.ctx.imageSmoothingEnabled = false;
+        // the last horizontal line (in case of off-tile height)
         engine_1.ctx.fillRect(0, toolOffset, engine_1.width, 1);
-        // split the tile set
-        const tileW = toolSize + 5;
-        const atlas = loadedAtlases[curAtlas];
-        for (let j = 0; j < atlas.height; j += 16) {
-            for (let i = 0; i < atlas.width; i += 16) {
-                const layer = (j / 16) % 4;
-                const wOffset = Math.floor(j / 16 / 4) * ((atlas.width / 16) * tileW + 5);
-                engine_1.ctx.drawImage(atlas, i, j, 16, 16, 5 + (i / 16) * tileW + wOffset, toolOffset + 10 + layer * tileW, toolSize, toolSize);
+    }
+    function drawUI() {
+        for (const o of ui) {
+            switch (o.kind) {
+                case 'button':
+                    drawButton(o);
+                    break;
             }
         }
     }
-    function drawAtlasList() {
-        const offset = toolOffset + 5;
-        engine_1.ctx.fillStyle = '#FFF';
-        engine_1.ctx.font = '16px monospace';
-        for (let i = 0; i < atlasPaths.length; ++i) {
-            const msg = atlasPaths[i]
-                .replace('img/', '')
-                .replace('.png', '');
-            const dims = engine_1.ctx.measureText(msg);
-            engine_1.ctx.fillStyle = atlasPaths[i] === curAtlas ? 'floralwhite' : 'darkgray';
-            engine_1.ctx.fillText(msg, engine_1.width - dims.width - 5, offset + 21 + i * 21);
+    function drawButton(o) {
+        if (o.borderW) {
+            engine_1.ctx.strokeStyle = o.color;
+            engine_1.ctx.lineWidth = o.borderW;
+            engine_1.ctx.strokeRect(o.x, o.y, o.w, o.h);
         }
-        engine_1.ctx.strokeStyle = 'darkgray';
-        engine_1.ctx.lineWidth = 1;
-        for (let i = 0; i < atlasPaths.length; ++i) {
-            engine_1.ctx.strokeRect(engine_1.width - 150, offset + 5 + i * 21, 149, 21);
+        if (o.inner.kind === 'text') {
+            engine_1.ctx.fillStyle = o.inner.color;
+            engine_1.ctx.font = o.inner.font;
+            const dims = engine_1.ctx.measureText(o.inner.text);
+            engine_1.ctx.fillText(o.inner.text, o.x + o.w - dims.width - 4, o.y + o.h - 5);
         }
-        // const idx = atlasPaths.indexOf(curAtlas);
-        // ctx.strokeStyle = 'floralwhite';
-        // ctx.lineWidth = 2;
-        // ctx.strokeRect(width - 149, offset + 5 + idx * 21, 148, 21);
-    }
-    function drawZoomLevel() {
-        const msg = 'x' + gridSize;
-        const dims = engine_1.ctx.measureText(msg);
-        engine_1.ctx.font = '16px monospace';
-        engine_1.ctx.fillStyle = 'darkgray';
-        engine_1.ctx.fillText(msg, engine_1.width - dims.width - 155, toolOffset + 26);
+        if (o.inner.kind === 'image') {
+            const atlas = loadedAtlases[o.inner.src];
+            engine_1.ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, o.x, o.y, o.w, o.h);
+        }
     }
     function drawObjects() {
         for (const o of objects) {
@@ -518,6 +503,12 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         currentTile = undefined;
     }
     function onClickHandler() {
+        for (const o of ui) {
+            if (engine_1.mouseX >= o.x && engine_1.mouseX <= o.x + o.w
+                && engine_1.mouseY >= o.y && engine_1.mouseY <= o.y + o.h) {
+                o.onClick(o);
+            }
+        }
         if (engine_1.mouseY <= toolOffset) {
             if (!currentTile) {
                 return;
@@ -527,17 +518,114 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
             objects.push({ x, y, tileX: currentTile.x, tileY: currentTile.y, atlas: curAtlas });
             return;
         }
-        const tileW = toolSize + 5;
+    }
+    function regenerateUI() {
+        if (loading) {
+            return;
+        }
+        engine_1.ctx.imageSmoothingEnabled = false;
+        toolOffset = engine_1.height - (toolSize + 5) * 4 - 5 - 5;
+        ui = [
+            createZoomButton(),
+            ...createAtlasList(),
+            ...createAtlasTiles(),
+        ];
+    }
+    function createAtlasTiles() {
         const atlas = loadedAtlases[curAtlas];
-        const rowWidth = atlas.width / 16 * tileW + 5;
-        const x = (engine_1.mouseX % rowWidth) / tileW | 0;
-        const y = (engine_1.mouseY - toolOffset - 10) / tileW | 0 + Math.floor(engine_1.mouseX / rowWidth) * 4;
-        currentTile = { x, y };
-        if (engine_1.mouseX >= engine_1.width - 150) {
-            const idx = (engine_1.mouseY - toolOffset - 11) / 21 | 0;
-            if (idx < atlasPaths.length) {
-                curAtlas = atlasPaths[idx];
-            }
+        const aw = atlas.width / sliceSize;
+        const ah = atlas.height / sliceSize;
+        const count = ah * aw;
+        const acc = [];
+        for (let i = 0; i < count; ++i) {
+            const ax = i % aw;
+            const ay = i / aw | 0;
+            const tx = Math.floor(ay / 4) * aw + ax;
+            const ty = ay % 4;
+            const btn = {
+                kind: 'button',
+                id: 'btn:' + ax + ':' + ay,
+                data: { x: ax, y: ay },
+                x: 5 + tx * (toolSize + 5),
+                y: toolOffset + 10 + ty * (toolSize + 5),
+                w: toolSize,
+                h: toolSize,
+                color: 'darkgray',
+                borderW: 0,
+                inner: {
+                    kind: 'image',
+                    src: curAtlas,
+                    dx: ax * sliceSize,
+                    dy: ay * sliceSize,
+                    w: sliceSize,
+                    h: sliceSize
+                },
+                onClick: onAtlasTileClick
+            };
+            acc.push(btn);
+        }
+        return acc;
+    }
+    function onAtlasTileClick(x) {
+        currentTile = x.data;
+    }
+    function createAtlasList() {
+        return atlasPaths.map((path, i) => {
+            const text = path
+                .replace('img/', '')
+                .replace('.png', '');
+            return {
+                kind: 'button',
+                id: path,
+                data: undefined,
+                x: engine_1.width - 150,
+                y: toolOffset + 10 + i * 21,
+                w: 149,
+                h: 21,
+                color: 'darkgray',
+                borderW: 1,
+                inner: {
+                    kind: 'text',
+                    text,
+                    font: '16px monospace',
+                    get color() {
+                        return path === curAtlas ? 'floralwhite' : 'darkgray';
+                    }
+                },
+                onClick: onAtlasButtonClick
+            };
+        });
+    }
+    function onAtlasButtonClick(x) {
+        curAtlas = x.id;
+        regenerateUI();
+    }
+    function createZoomButton() {
+        return {
+            kind: 'button',
+            id: 'zoomButton',
+            data: undefined,
+            x: engine_1.width - 200,
+            y: toolOffset + 10,
+            w: 45,
+            h: 21,
+            color: 'darkgray',
+            borderW: 0,
+            inner: {
+                kind: 'text',
+                get text() {
+                    return 'x' + gridSize;
+                },
+                font: '16px monospace',
+                color: 'darkgray'
+            },
+            onClick: onZoomButtonClick
+        };
+    }
+    function onZoomButtonClick(x) {
+        gridSize = gridSize + 16;
+        if (gridSize > 128) {
+            gridSize = 16;
         }
     }
 });
@@ -548,7 +636,7 @@ define("game", ["require", "exports", "engine"], function (require, exports, eng
     let loading = true;
     const image = new Image();
     image.onload = () => loading = false;
-    image.src = 'img/grass-set.png';
+    image.src = 'img/grass.png';
     let playerX;
     let playerY;
     let playerSpeed = 200;
