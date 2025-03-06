@@ -473,7 +473,8 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
             engine_1.ctx.fillStyle = o.inner.color;
             engine_1.ctx.font = o.inner.font;
             const dims = engine_1.ctx.measureText(o.inner.text);
-            engine_1.ctx.fillText(o.inner.text, o.x + o.w - dims.width - 4, o.y + dims.fontBoundingBoxAscent);
+            const ch = Math.round((o.h - dims.actualBoundingBoxAscent) / 2);
+            engine_1.ctx.fillText(o.inner.text, o.x + o.w - dims.width - 4 | 0, o.y + dims.actualBoundingBoxAscent + ch | 0);
         }
         if (o.inner.kind === 'image') {
             const atlas = loadedAtlases[o.inner.src];
@@ -523,7 +524,7 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         if (loading) {
             return;
         }
-        toolSize = gridSize = (engine_1.width < 600) ? 32 : 64;
+        toolSize = (engine_1.width < 600) ? 32 : 64;
         engine_1.ctx.imageSmoothingEnabled = false;
         toolOffset = engine_1.height - (toolSize + 5) * 4 - 5 - 5;
         ui = [
@@ -572,9 +573,9 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         currentTile = x.data;
     }
     function createAtlasList() {
-        const w = (engine_1.width < 600) ? 100 : 150;
+        const w = (engine_1.width < 600) ? 90 : 150;
         const h = (engine_1.width < 600) ? 12 : 21;
-        const font = (engine_1.width < 600) ? '10px monospace' : '16px monospace';
+        const font = (engine_1.width < 600) ? '9px monospace' : '14px monospace';
         return atlasPaths.map((path, i) => {
             const text = path
                 .replace('img/', '')
@@ -606,10 +607,10 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         regenerateUI();
     }
     function createZoomButton() {
-        const aw = (engine_1.width < 600) ? 100 : 150;
-        const w = (engine_1.width < 600) ? 30 : 50;
+        const aw = (engine_1.width < 600) ? 90 : 150;
+        const w = (engine_1.width < 600) ? 35 : 50;
         const h = (engine_1.width < 600) ? 12 : 21;
-        const font = (engine_1.width < 600) ? '10px monospace' : '16px monospace';
+        const font = (engine_1.width < 600) ? '9px monospace' : '14px monospace';
         return {
             kind: 'button',
             id: 'zoomButton',
