@@ -473,7 +473,7 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
             engine_1.ctx.fillStyle = o.inner.color;
             engine_1.ctx.font = o.inner.font;
             const dims = engine_1.ctx.measureText(o.inner.text);
-            engine_1.ctx.fillText(o.inner.text, o.x + o.w - dims.width - 4, o.y + o.h - 5);
+            engine_1.ctx.fillText(o.inner.text, o.x + o.w - dims.width - 4, o.y + dims.fontBoundingBoxAscent);
         }
         if (o.inner.kind === 'image') {
             const atlas = loadedAtlases[o.inner.src];
@@ -523,6 +523,7 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         if (loading) {
             return;
         }
+        toolSize = gridSize = (engine_1.width < 600) ? 32 : 64;
         engine_1.ctx.imageSmoothingEnabled = false;
         toolOffset = engine_1.height - (toolSize + 5) * 4 - 5 - 5;
         ui = [
@@ -535,7 +536,8 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         const atlas = loadedAtlases[curAtlas];
         const aw = atlas.width / sliceSize;
         const ah = atlas.height / sliceSize;
-        const count = ah * aw;
+        const maxTiles = Math.floor((engine_1.width - 205) / (toolSize + 5)) * 4;
+        const count = Math.min(ah * aw, maxTiles);
         const acc = [];
         for (let i = 0; i < count; ++i) {
             const ax = i % aw;
@@ -570,6 +572,9 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         currentTile = x.data;
     }
     function createAtlasList() {
+        const w = (engine_1.width < 600) ? 100 : 150;
+        const h = (engine_1.width < 600) ? 12 : 21;
+        const font = (engine_1.width < 600) ? '10px monospace' : '16px monospace';
         return atlasPaths.map((path, i) => {
             const text = path
                 .replace('img/', '')
@@ -578,16 +583,16 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
                 kind: 'button',
                 id: path,
                 data: undefined,
-                x: engine_1.width - 150,
-                y: toolOffset + 10 + i * 21,
-                w: 149,
-                h: 21,
+                x: engine_1.width - w,
+                y: toolOffset + 10 + i * h,
+                w: w - 1,
+                h: h,
                 color: 'darkgray',
                 borderW: 1,
                 inner: {
                     kind: 'text',
                     text,
-                    font: '16px monospace',
+                    font,
                     get color() {
                         return path === curAtlas ? 'floralwhite' : 'darkgray';
                     }
@@ -601,22 +606,26 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         regenerateUI();
     }
     function createZoomButton() {
+        const aw = (engine_1.width < 600) ? 100 : 150;
+        const w = (engine_1.width < 600) ? 30 : 50;
+        const h = (engine_1.width < 600) ? 12 : 21;
+        const font = (engine_1.width < 600) ? '10px monospace' : '16px monospace';
         return {
             kind: 'button',
             id: 'zoomButton',
             data: undefined,
-            x: engine_1.width - 200,
+            x: engine_1.width - aw - w,
             y: toolOffset + 10,
-            w: 45,
-            h: 21,
+            w: w - 5,
+            h,
             color: 'darkgray',
-            borderW: 0,
+            borderW: 1,
             inner: {
                 kind: 'text',
                 get text() {
                     return 'x' + gridSize;
                 },
-                font: '16px monospace',
+                font,
                 color: 'darkgray'
             },
             onClick: onZoomButtonClick
