@@ -40,8 +40,9 @@ let KbShortcuts: Map<string, () => void> = new Map();
 
 export type VEvent = { kind: 'mouseup',   clickX: number, clickY: number }
                    | { kind: 'mousedown', clickX: number, clickY: number }
+                   | { kind: 'resize' }
 
-const eventRegistry: { [evt: string]: ((e: VEvent) => void)[] } = {};
+const eventRegistry: { [E in VEvent['kind']]?: ((e: Extract<VEvent, { kind: E }>) => void)[] } = {};
 
 export function setup() {
     canvas = document.getElementById('gameCanvas')! as HTMLCanvasElement;
@@ -148,17 +149,17 @@ export function toggleRun() {
     !gameStop && window.requestAnimationFrame(draw);
 }
 
-export function listen(e: VEvent['kind'], f: (evt: VEvent) => void) {
+export function listen<E extends VEvent['kind']>(e: E, f: (evt: Extract<VEvent, { kind: E }>) => void) {
     eventRegistry[e] = eventRegistry[e] || [];
-    eventRegistry[e].push(f);
+    eventRegistry[e]!.push(f);
 }
 
-export function unlisten(e: VEvent['kind'], f: (evt: VEvent) => void) {
-    eventRegistry[e] = (eventRegistry[e] || []).filter(x => x !== f);
+export function unlisten<E extends VEvent['kind']>(e: E, f: (evt: Extract<VEvent, { kind: E }>) => void) {
+    eventRegistry[e] = eventRegistry[e]?.filter(x => x !== f) as any; // TYH
 }
 
 export function raise(e: VEvent) {
-    eventRegistry[e.kind]?.forEach(fn => fn(e));
+    eventRegistry[e.kind]?.forEach(fn => fn(e as any));   // TYH
 }
 
 function resize() {
@@ -177,6 +178,8 @@ function resize() {
 
         ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
     }
+
+    raise({ kind: 'resize' });
 }
 
 function keydownListener(e: KeyboardEvent) {

@@ -34,17 +34,41 @@ let loading = true;
 
 let toolSize = 64;
 let gridSize = 64;
+let sliceSize = 16;
 let toolOffset: number;
 
 let objects: { x: number, y: number, tileX: number, tileY: number, atlas: string }[] = [];
 
+let ui: UI<any>[] = [];
+
 let curAtlas = 'img/grass.png';
 let currentTile: { x: number, y: number } | undefined;
 
+type ImageSlice = { kind: 'image', src: string, dx: number, dy: number, w: number, h: number }
+type TextProps  = { kind: 'text', text: string, font: string, color: string }
+
+type UI<T> = Button<T>
+
+type Button<T> = {
+    kind: 'button',
+    id: string,
+    data: T,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    color: string,
+    borderW: number,
+    inner: ImageSlice | TextProps,
+    onClick: (o: Button<T>) => void
+}
 
 export function setup() {
-    listen('mouseup', onClickHandler);
+
     registerShortcuts(KbShortcuts);
+
+    listen('mouseup', onClickHandler);
+    listen('resize', regenerateUI);
 
     canvas.addEventListener('contextmenu', e => {
         const x = Math.floor(mouseX / gridSize) * gridSize;
@@ -60,7 +84,7 @@ export function setup() {
         gridSize = clamp(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
     });
 
-    addDebugMsg(() => '' + toolOffset);
+
     loadAtlases();
 }
 
@@ -80,6 +104,7 @@ function loadAtlases() {
 
             if (--leftToLoad === 0) {
                 loading = false;
+                regenerateUI();
             }
         };
 
@@ -88,24 +113,24 @@ function loadAtlases() {
 }
 
 export function draw(dt: number) {
-    ctx.clearRect(0, 0, width, height);
-
     if (loading) {
         drawLoading();
         return;
     }
 
-    toolOffset = height - (toolSize + 5) * 4 - 5 - 5;
+    // clear the screen
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, width, height);
 
-    drawAtlas();
-    drawAtlasList();
-    drawZoomLevel();
+    drawUI();
     drawGrid();
     drawObjects();
     drawCursor();
 }
 
 function drawLoading() {
+    ctx.clearRect(0, 0, width, height);
+
     ctx.fillStyle = '#34495E';
     ctx.font = '32px serif';
 
@@ -125,67 +150,40 @@ function drawGrid() {
     for (let y = 0; y < toolOffset; y += gridSize) {
         ctx.fillRect(0, y, width, 1);
     }
+
+    // the last horizontal line (in case of off-tile height)
+    ctx.fillRect(0, toolOffset, width, 1);
 }
 
-function drawAtlas() {
-
-    // clear the screen
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, width, height);
-
-    ctx.fillStyle = '#FFF';
-    ctx.imageSmoothingEnabled = false;
-
-    ctx.fillRect(0, toolOffset, width, 1);
-
-    // split the tile set
-    const tileW = toolSize + 5;
-    const atlas = loadedAtlases[curAtlas];
-    for (let j = 0; j < atlas.height; j += 16) {
-        for (let i = 0; i < atlas.width; i += 16) {
-            const layer = (j / 16) % 4;
-            const wOffset = Math.floor(j / 16 / 4) * ((atlas.width / 16) * tileW + 5);
-
-            ctx.drawImage(atlas, i, j, 16, 16, 5 + (i / 16) * tileW + wOffset, toolOffset + 10 + layer * tileW, toolSize, toolSize);
+function drawUI() {
+    for (const o of ui) {
+        switch (o.kind) {
+            case 'button': drawButton(o); break;
         }
     }
 }
 
-function drawAtlasList() {
-    const offset = toolOffset + 5;
+function drawButton(o: Button<unknown>) {
+    if (o.borderW) {
+        ctx.strokeStyle = o.color;
+        ctx.lineWidth = o.borderW;
 
-    ctx.fillStyle = '#FFF';
-    ctx.font = '16px monospace';
-
-    for (let i = 0; i < atlasPaths.length; ++i) {
-        const msg = atlasPaths[i]
-            .replace('img/', '')
-            .replace('.png', '');
-
-        const dims = ctx.measureText(msg);
-        ctx.fillStyle = atlasPaths[i] === curAtlas ? 'floralwhite' : 'darkgray';
-        ctx.fillText(msg, width - dims.width - 5, offset + 21 + i * 21);
+        ctx.strokeRect(o.x, o.y, o.w, o.h);
     }
 
-    ctx.strokeStyle = 'darkgray';
-    ctx.lineWidth = 1;
-    for (let i = 0; i < atlasPaths.length; ++i) {
-        ctx.strokeRect(width - 150, offset + 5 + i * 21, 149, 21);
+    if (o.inner.kind === 'text') {
+        ctx.fillStyle = o.inner.color;
+        ctx.font = o.inner.font;
+
+        const dims = ctx.measureText(o.inner.text);
+        ctx.fillText(o.inner.text, o.x + o.w - dims.width - 4, o.y + o.h - 5);
     }
 
-    // const idx = atlasPaths.indexOf(curAtlas);
-    // ctx.strokeStyle = 'floralwhite';
-    // ctx.lineWidth = 2;
-    // ctx.strokeRect(width - 149, offset + 5 + idx * 21, 148, 21);
-}
+    if (o.inner.kind === 'image') {
+        const atlas = loadedAtlases[o.inner.src];
 
-function drawZoomLevel() {
-    const msg = 'x' + gridSize;
-    const dims = ctx.measureText(msg);
-
-    ctx.font = '16px monospace';
-    ctx.fillStyle = 'darkgray';
-    ctx.fillText(msg, width - dims.width - 155, toolOffset + 26);
+        ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, o.x, o.y, o.w, o.h);
+    }
 }
 
 function drawObjects() {
@@ -218,6 +216,14 @@ function onEscape() {
 }
 
 function onClickHandler() {
+    for (const o of ui) {
+        if (mouseX >= o.x && mouseX <= o.x + o.w
+            && mouseY >= o.y && mouseY <= o.y + o.h) {
+
+            o.onClick(o);
+        }
+    }
+
     if (mouseY <= toolOffset) {
         if (!currentTile) {
             return;
@@ -229,20 +235,130 @@ function onClickHandler() {
 
         return;
     }
+}
 
-    const tileW = toolSize + 5;
+function regenerateUI() {
+    if (loading) {
+        return;
+    }
+
+    ctx.imageSmoothingEnabled = false;
+    toolOffset = height - (toolSize + 5) * 4 - 5 - 5;
+
+    ui = [
+        createZoomButton(),
+        ... createAtlasList(),
+        ... createAtlasTiles(),
+    ];
+}
+
+function createAtlasTiles(): Button<{x: number, y: number}>[] {
+
     const atlas = loadedAtlases[curAtlas];
-    const rowWidth = atlas.width / 16 * tileW + 5;
 
-    const x = (mouseX % rowWidth) / tileW | 0;
-    const y = (mouseY - toolOffset - 10) / tileW | 0 + Math.floor(mouseX / rowWidth) * 4;
+    const aw = atlas.width / sliceSize;
+    const ah = atlas.height / sliceSize;
+    const count = ah * aw;
 
-    currentTile = { x, y };
+    const acc = [];
+    for (let i = 0; i < count; ++i) {
+        const ax = i % aw;
+        const ay = i / aw | 0;
 
-    if (mouseX >= width - 150) {
-        const idx = (mouseY - toolOffset - 11) / 21 | 0;
-        if (idx < atlasPaths.length) {
-            curAtlas = atlasPaths[idx];
-        }
+        const tx = Math.floor(ay / 4) * aw + ax;
+        const ty = ay % 4;
+
+        const btn: Button<{x: number, y: number}> = {
+            kind: 'button',
+            id: 'btn:' + ax + ':' + ay,
+            data: { x: ax, y: ay },
+            x: 5 + tx * (toolSize + 5),
+            y: toolOffset + 10 + ty * (toolSize + 5),
+            w: toolSize,
+            h: toolSize,
+            color: 'darkgray',
+            borderW: 0,
+            inner: {
+                kind: 'image',
+                src: curAtlas,
+                dx: ax * sliceSize,
+                dy: ay * sliceSize,
+                w: sliceSize,
+                h: sliceSize
+            },
+            onClick: onAtlasTileClick
+        };
+
+        acc.push(btn);
+    }
+
+    return acc;
+}
+
+function onAtlasTileClick(x: ReturnType<typeof createAtlasTiles>[0]) {
+    currentTile = x.data;
+}
+
+function createAtlasList(): Button<undefined>[] {
+    return atlasPaths.map<Button<undefined>>((path, i) => {
+        const text = path
+            .replace('img/', '')
+            .replace('.png', '');
+
+        return {
+            kind: 'button',
+            id: path,
+            data: undefined,
+            x: width - 150,
+            y: toolOffset + 10 + i * 21,
+            w: 149,
+            h: 21,
+            color: 'darkgray',
+            borderW: 1,
+            inner: {
+                kind: 'text',
+                text,
+                font: '16px monospace',
+                get color() {
+                    return path === curAtlas ? 'floralwhite' : 'darkgray';
+                }
+            },
+            onClick: onAtlasButtonClick
+        };
+    });
+}
+
+function onAtlasButtonClick(x: ReturnType<typeof createAtlasList>[0]) {
+    curAtlas = x.id;
+    regenerateUI();
+}
+
+function createZoomButton(): Button<undefined> {
+    return {
+        kind: 'button',
+        id: 'zoomButton',
+        data: undefined,
+        x: width - 200,
+        y: toolOffset + 10,
+        w: 45,
+        h: 21,
+        color: 'darkgray',
+        borderW: 0,
+        inner: {
+            kind: 'text',
+            get text() {
+                return 'x' + gridSize;
+            },
+            font: '16px monospace',
+            color: 'darkgray'
+        },
+        onClick: onZoomButtonClick
+    };
+}
+
+function onZoomButtonClick(x: ReturnType<typeof createZoomButton>) {
+    gridSize = gridSize + 16;
+    if (gridSize > 128) {
+        gridSize = 16;
     }
 }

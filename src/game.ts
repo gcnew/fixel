@@ -10,7 +10,7 @@ let loading = true;
 
 const image = new Image();
 image.onload = () => loading = false;
-image.src = 'img/grass-set.png';
+image.src = 'img/grass.png';
 
 let playerX: number;
 let playerY: number;
