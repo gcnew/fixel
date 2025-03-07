@@ -89,6 +89,28 @@ export function setup() {
         gridSize = clamp(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
     });
 
+    let touchId: number | undefined;
+    let touchY: number;
+    canvas.addEventListener('touchstart', e => {
+        if (e.touches.length === 2) {
+            touchId = e.touches[0].identifier;
+            touchY = e.touches[0].screenY;
+        }
+    });
+
+    canvas.addEventListener('touchmove', e => {
+        const touch = [... e.touches].find(t => t.identifier === touchId);
+        if (!touch) {
+            return;
+        }
+
+        const deltaY = touchY - touch.screenY;
+        gridSize = clamp(gridSize + (deltaY > 0 ? 16 : -16), 16, 128);
+    });
+
+    canvas.addEventListener('touchend', e => {
+        touchId = undefined;
+    });
 
     loadAtlases();
 }
@@ -147,7 +169,7 @@ function drawLoading() {
 
 function drawGrid() {
 
-    ctx.fillStyle = '#FFF';
+    ctx.fillStyle = 'darkgray';
     for (let x = 0; x < width; x += gridSize) {
         ctx.fillRect(x, 0, 1, toolOffset);
     }
