@@ -109,7 +109,9 @@ export function setup() {
             return;
         }
 
-        const deltaY = touchY - touch.screenY;
+        const deltaY = (touchY - touch.screenY) / 15 | 0;
+        touchY = touch.screenY;
+
         gridSize = clamp(gridSize + (deltaY > 0 ? 16 : -16), 16, 128);
     }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 
