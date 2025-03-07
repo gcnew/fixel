@@ -99,6 +99,11 @@ export function setup() {
     });
 
     canvas.addEventListener('touchmove', e => {
+        // this disables two-finger zooming on safari
+        if ('scale' in e && (e as any).scale !== 1) {
+            e.preventDefault();
+        }
+
         const touch = [... e.touches].find(t => t.identifier === touchId);
         if (!touch) {
             return;
@@ -106,7 +111,7 @@ export function setup() {
 
         const deltaY = touchY - touch.screenY;
         gridSize = clamp(gridSize + (deltaY > 0 ? 16 : -16), 16, 128);
-    });
+    }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 
     canvas.addEventListener('touchend', e => {
         touchId = undefined;
