@@ -468,11 +468,6 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         }
     }
     function drawButton(o) {
-        if (o.borderW) {
-            engine_1.ctx.strokeStyle = o.color;
-            engine_1.ctx.lineWidth = o.borderW;
-            engine_1.ctx.strokeRect(o.x, o.y, o.w, o.h);
-        }
         if (o.inner.kind === 'text') {
             engine_1.ctx.fillStyle = o.inner.color;
             engine_1.ctx.font = o.inner.font;
@@ -483,6 +478,11 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         if (o.inner.kind === 'image') {
             const atlas = loadedAtlases[o.inner.src];
             engine_1.ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, o.x, o.y, o.w, o.h);
+        }
+        if (o.borderW) {
+            engine_1.ctx.strokeStyle = o.color;
+            engine_1.ctx.lineWidth = o.borderW;
+            engine_1.ctx.strokeRect(o.x, o.y, o.w, o.h);
         }
     }
     function drawObjects() {
@@ -533,7 +533,6 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         toolOffset = engine_1.height - (toolSize + 5) * 4 - 5 - 5;
         ui = [
             createZoomButton(),
-            createCurrentToolButton(),
             ...createAtlasList(),
             ...createAtlasTiles(),
         ];
@@ -569,27 +568,6 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         if (gridSize > 128) {
             gridSize = 16;
         }
-    }
-    function createCurrentToolButton() {
-        const aw = (engine_1.width < 600) ? 90 : 150;
-        const zh = (engine_1.width < 600) ? 12 : 21;
-        return {
-            kind: 'button',
-            id: 'zoomButton',
-            data: undefined,
-            x: engine_1.width - aw - toolSize - 5,
-            y: toolOffset + 15 + zh,
-            w: toolSize,
-            h: toolSize,
-            color: 'darkgray',
-            borderW: 1,
-            get inner() {
-                return currentTile
-                    ? { kind: 'image', src: curAtlas, dx: currentTile.x * sliceSize, dy: currentTile.y * sliceSize, w: sliceSize, h: sliceSize }
-                    : { kind: 'image', src: 'img/empty.png', dx: 0, dy: 0, w: 360, h: 360 };
-            },
-            onClick: onEscape
-        };
     }
     function createAtlasList() {
         const w = (engine_1.width < 600) ? 90 : 150;
@@ -645,8 +623,8 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
                 y: toolOffset + 10 + ty * (toolSize + 5),
                 w: toolSize,
                 h: toolSize,
-                color: 'darkgray',
-                borderW: 0,
+                color: '#cc0909',
+                get borderW() { return currentTile === this.data ? 2 : 0; },
                 inner: {
                     kind: 'image',
                     src: curAtlas,
@@ -662,7 +640,9 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         return acc;
     }
     function onAtlasTileClick(x) {
-        currentTile = x.data;
+        currentTile = currentTile === x.data
+            ? undefined
+            : x.data;
     }
 });
 define("game", ["require", "exports", "engine"], function (require, exports, engine_2) {
