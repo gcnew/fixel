@@ -412,13 +412,17 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
             }
         });
         engine_1.canvas.addEventListener('touchmove', e => {
+            // this disables two-finger zooming on safari
+            if ('scale' in e && e.scale !== 1) {
+                e.preventDefault();
+            }
             const touch = [...e.touches].find(t => t.identifier === touchId);
             if (!touch) {
                 return;
             }
             const deltaY = touchY - touch.screenY;
             gridSize = (0, util_2.clamp)(gridSize + (deltaY > 0 ? 16 : -16), 16, 128);
-        });
+        }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
         engine_1.canvas.addEventListener('touchend', e => {
             touchId = undefined;
         });
