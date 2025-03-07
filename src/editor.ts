@@ -28,6 +28,11 @@ const atlasPaths = [
     'img/water.png',
 ];
 
+const assetPaths = [
+    'img/empty.png',
+    ... atlasPaths
+];
+
 const loadedAtlases: { [k: string]: HTMLImageElement } = {};
 
 let loading = true;
@@ -94,9 +99,9 @@ export function tearDown() {
 }
 
 function loadAtlases() {
-    let leftToLoad = atlasPaths.length;
+    let leftToLoad = assetPaths.length;
 
-    atlasPaths.map(p => {
+    for (const p of assetPaths) {
         const img = new Image();
 
         img.onload = () => {
@@ -109,7 +114,7 @@ function loadAtlases() {
         };
 
         img.src = p;
-    });
+    }
 }
 
 export function draw(dt: number) {
@@ -191,7 +196,7 @@ function drawObjects() {
     for (const o of objects) {
         const atlas = loadedAtlases[o.atlas];
 
-        ctx.drawImage(atlas, o.tileX * 16, o.tileY * 16, 16, 16, o.x, o.y, gridSize, gridSize);
+        ctx.drawImage(atlas, o.tileX * sliceSize, o.tileY * sliceSize, sliceSize, sliceSize, o.x, o.y, gridSize, gridSize);
     }
 }
 
@@ -200,16 +205,15 @@ function drawCursor() {
         return;
     }
 
-    const x = mouseY <= toolOffset
-        ? Math.floor(mouseX / gridSize) * gridSize
-        : mouseX - (gridSize / 2);
+    if (mouseY > toolOffset) {
+        return;
+    }
 
-    const y = mouseY <= toolOffset
-        ? Math.floor(mouseY / gridSize) * gridSize
-        : mouseY - (gridSize / 2);
-
+    const x = Math.floor(mouseX / gridSize) * gridSize;
+    const y = Math.floor(mouseY / gridSize) * gridSize;
     const atlas = loadedAtlases[curAtlas];
-    ctx.drawImage(atlas, currentTile.x * 16, currentTile.y * 16 , 16, 16, x, y, gridSize, gridSize);
+
+    ctx.drawImage(atlas, currentTile.x * sliceSize, currentTile.y * sliceSize , sliceSize, sliceSize, x, y, gridSize, gridSize);
 }
 
 function onEscape() {
@@ -222,6 +226,7 @@ function onClickHandler() {
             && mouseY >= o.y && mouseY <= o.y + o.h) {
 
             o.onClick(o);
+            break;
         }
     }
 
@@ -250,9 +255,106 @@ function regenerateUI() {
 
     ui = [
         createZoomButton(),
+        createCurrentToolButton(),
         ... createAtlasList(),
         ... createAtlasTiles(),
     ];
+}
+
+function createZoomButton(): Button<undefined> {
+    const aw = (width < 600) ? 90 : 150;
+    const w = (width < 600) ? 35 : 50;
+    const h = (width < 600) ? 12  : 21;
+    const font = (width < 600) ? '9px monospace' : '14px monospace';
+
+    return {
+        kind: 'button',
+        id: 'zoomButton',
+        data: undefined,
+        x: width - aw - w,
+        y: toolOffset + 10,
+        w: w - 5,
+        h,
+        color: 'darkgray',
+        borderW: 1,
+        inner: {
+            kind: 'text',
+            get text() {
+                return 'x' + gridSize;
+            },
+            font,
+            color: 'darkgray'
+        },
+        onClick: onZoomButtonClick
+    };
+}
+
+function onZoomButtonClick(x: ReturnType<typeof createZoomButton>) {
+    gridSize = gridSize + 16;
+    if (gridSize > 128) {
+        gridSize = 16;
+    }
+}
+
+function createCurrentToolButton(): Button<undefined> {
+    const aw = (width < 600) ? 90 : 150;
+    const zh = (width < 600) ? 12  : 21;
+
+    return {
+        kind: 'button',
+        id: 'zoomButton',
+        data: undefined,
+        x: width - aw - toolSize - 5,
+        y: toolOffset + 15 + zh,
+        w: toolSize,
+        h: toolSize,
+        color: 'darkgray',
+        borderW: 1,
+        get inner(): ImageSlice {
+            return currentTile
+                ? { kind: 'image', src: curAtlas, dx: currentTile.x * sliceSize, dy: currentTile.y * sliceSize, w: sliceSize, h: sliceSize }
+                : { kind: 'image', src: 'img/empty.png', dx: 0, dy: 0, w: 360, h: 360 };
+        },
+        onClick: onEscape
+    };
+}
+
+function createAtlasList(): Button<undefined>[] {
+    const w = (width < 600) ? 90 : 150;
+    const h = (width < 600) ? 12  : 21;
+    const font = (width < 600) ? '9px monospace' : '14px monospace';
+
+    return atlasPaths.map<Button<undefined>>((path, i) => {
+        const text = path
+            .replace('img/', '')
+            .replace('.png', '');
+
+        return {
+            kind: 'button',
+            id: path,
+            data: undefined,
+            x: width - w,
+            y: toolOffset + 10 + i * h,
+            w: w - 1,
+            h: h,
+            color: 'darkgray',
+            borderW: 1,
+            inner: {
+                kind: 'text',
+                text,
+                font,
+                get color() {
+                    return path === curAtlas ? 'floralwhite' : 'darkgray';
+                }
+            },
+            onClick: onAtlasButtonClick
+        };
+    });
+}
+
+function onAtlasButtonClick(x: ReturnType<typeof createAtlasList>[0]) {
+    curAtlas = x.id;
+    regenerateUI();
 }
 
 function createAtlasTiles(): Button<{x: number, y: number}>[] {
@@ -301,77 +403,4 @@ function createAtlasTiles(): Button<{x: number, y: number}>[] {
 
 function onAtlasTileClick(x: ReturnType<typeof createAtlasTiles>[0]) {
     currentTile = x.data;
-}
-
-function createAtlasList(): Button<undefined>[] {
-    const w = (width < 600) ? 90 : 150;
-    const h = (width < 600) ? 12  : 21;
-    const font = (width < 600) ? '9px monospace' : '14px monospace';
-
-    return atlasPaths.map<Button<undefined>>((path, i) => {
-        const text = path
-            .replace('img/', '')
-            .replace('.png', '');
-
-        return {
-            kind: 'button',
-            id: path,
-            data: undefined,
-            x: width - w,
-            y: toolOffset + 10 + i * h,
-            w: w - 1,
-            h: h,
-            color: 'darkgray',
-            borderW: 1,
-            inner: {
-                kind: 'text',
-                text,
-                font,
-                get color() {
-                    return path === curAtlas ? 'floralwhite' : 'darkgray';
-                }
-            },
-            onClick: onAtlasButtonClick
-        };
-    });
-}
-
-function onAtlasButtonClick(x: ReturnType<typeof createAtlasList>[0]) {
-    curAtlas = x.id;
-    regenerateUI();
-}
-
-function createZoomButton(): Button<undefined> {
-    const aw = (width < 600) ? 90 : 150;
-    const w = (width < 600) ? 35 : 50;
-    const h = (width < 600) ? 12  : 21;
-    const font = (width < 600) ? '9px monospace' : '14px monospace';
-
-    return {
-        kind: 'button',
-        id: 'zoomButton',
-        data: undefined,
-        x: width - aw - w,
-        y: toolOffset + 10,
-        w: w - 5,
-        h,
-        color: 'darkgray',
-        borderW: 1,
-        inner: {
-            kind: 'text',
-            get text() {
-                return 'x' + gridSize;
-            },
-            font,
-            color: 'darkgray'
-        },
-        onClick: onZoomButtonClick
-    };
-}
-
-function onZoomButtonClick(x: ReturnType<typeof createZoomButton>) {
-    gridSize = gridSize + 16;
-    if (gridSize > 128) {
-        gridSize = 16;
-    }
 }
