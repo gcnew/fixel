@@ -422,11 +422,11 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
                 return;
             }
             const deltaY = touchY - touch.screenY;
-            touchY = touch.screenY;
-            if (Date.now() - lastT < 100) {
+            if (Date.now() - lastT < 100 || Math.abs(deltaY) < 10) {
                 return;
             }
             lastT = Date.now();
+            touchY = touch.screenY;
             gridSize = (0, util_2.clamp)(gridSize + (deltaY > 0 ? 16 : -16), 16, 128);
         }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
         window.addEventListener('touchend', e => {
