@@ -403,6 +403,25 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         engine_1.canvas.addEventListener('wheel', e => {
             gridSize = (0, util_2.clamp)(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
         });
+        let touchId;
+        let touchY;
+        engine_1.canvas.addEventListener('touchstart', e => {
+            if (e.touches.length === 2) {
+                touchId = e.touches[0].identifier;
+                touchY = e.touches[0].screenY;
+            }
+        });
+        engine_1.canvas.addEventListener('touchmove', e => {
+            const touch = [...e.touches].find(t => t.identifier === touchId);
+            if (!touch) {
+                return;
+            }
+            const deltaY = touchY - touch.screenY;
+            gridSize = (0, util_2.clamp)(gridSize + (deltaY > 0 ? 16 : -16), 16, 128);
+        });
+        engine_1.canvas.addEventListener('touchend', e => {
+            touchId = undefined;
+        });
         loadAtlases();
     }
     exports.setup = setup;
@@ -448,7 +467,7 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         engine_1.ctx.fillText(`Loading ${'.'.repeat(dots)}`, (engine_1.width - dims.width) / 2, (engine_1.height - dims.fontBoundingBoxAscent) / 2);
     }
     function drawGrid() {
-        engine_1.ctx.fillStyle = '#FFF';
+        engine_1.ctx.fillStyle = 'darkgray';
         for (let x = 0; x < engine_1.width; x += gridSize) {
             engine_1.ctx.fillRect(x, 0, 1, toolOffset);
         }
@@ -601,6 +620,7 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
     }
     function onAtlasButtonClick(x) {
         curAtlas = x.id;
+        currentTile = undefined;
         regenerateUI();
     }
     function createAtlasTiles() {
