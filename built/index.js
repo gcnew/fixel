@@ -408,9 +408,7 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         let lastT = 0;
         window.addEventListener('touchstart', e => {
             // this disables two-finger zooming on safari
-            if ('scale' in e && e.scale !== 1) {
-                e.preventDefault();
-            }
+            e.preventDefault();
             if (e.touches.length === 2) {
                 touchId = e.touches[0].identifier;
                 touchY = e.touches[0].screenY;
@@ -418,16 +416,14 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
         window.addEventListener('touchmove', e => {
             // this disables two-finger zooming on safari
-            if ('scale' in e && e.scale !== 1) {
-                e.preventDefault();
-            }
+            e.preventDefault();
             const touch = [...e.touches].find(t => t.identifier === touchId);
             if (!touch) {
                 return;
             }
             const deltaY = touchY - touch.screenY;
             touchY = touch.screenY;
-            if (Date.now() - lastT < 50) {
+            if (Date.now() - lastT < 100) {
                 return;
             }
             lastT = Date.now();
@@ -435,9 +431,7 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
         window.addEventListener('touchend', e => {
             // this disables two-finger zooming on safari
-            if ('scale' in e && e.scale !== 1) {
-                e.preventDefault();
-            }
+            e.preventDefault();
             touchId = undefined;
         }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
         loadAtlases();
