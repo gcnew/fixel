@@ -403,15 +403,20 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         engine_1.canvas.addEventListener('wheel', e => {
             gridSize = (0, util_2.clamp)(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
         });
-        let touchId;
         let touchY;
-        engine_1.canvas.addEventListener('touchstart', e => {
+        let touchId;
+        let lastT = 0;
+        window.addEventListener('touchstart', e => {
+            // this disables two-finger zooming on safari
+            if ('scale' in e && e.scale !== 1) {
+                e.preventDefault();
+            }
             if (e.touches.length === 2) {
                 touchId = e.touches[0].identifier;
                 touchY = e.touches[0].screenY;
             }
-        });
-        engine_1.canvas.addEventListener('touchmove', e => {
+        }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
+        window.addEventListener('touchmove', e => {
             // this disables two-finger zooming on safari
             if ('scale' in e && e.scale !== 1) {
                 e.preventDefault();
@@ -420,13 +425,21 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
             if (!touch) {
                 return;
             }
-            const deltaY = (touchY - touch.screenY) / 15 | 0;
+            const deltaY = touchY - touch.screenY;
             touchY = touch.screenY;
+            if (Date.now() - lastT < 50) {
+                return;
+            }
+            lastT = Date.now();
             gridSize = (0, util_2.clamp)(gridSize + (deltaY > 0 ? 16 : -16), 16, 128);
         }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
-        engine_1.canvas.addEventListener('touchend', e => {
+        window.addEventListener('touchend', e => {
+            // this disables two-finger zooming on safari
+            if ('scale' in e && e.scale !== 1) {
+                e.preventDefault();
+            }
             touchId = undefined;
-        });
+        }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
         loadAtlases();
     }
     exports.setup = setup;
