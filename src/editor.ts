@@ -169,13 +169,6 @@ function drawUI() {
 }
 
 function drawButton(o: Button<unknown>) {
-    if (o.borderW) {
-        ctx.strokeStyle = o.color;
-        ctx.lineWidth = o.borderW;
-
-        ctx.strokeRect(o.x, o.y, o.w, o.h);
-    }
-
     if (o.inner.kind === 'text') {
         ctx.fillStyle = o.inner.color;
         ctx.font = o.inner.font;
@@ -189,6 +182,13 @@ function drawButton(o: Button<unknown>) {
         const atlas = loadedAtlases[o.inner.src];
 
         ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, o.x, o.y, o.w, o.h);
+    }
+
+    if (o.borderW) {
+        ctx.strokeStyle = o.color;
+        ctx.lineWidth = o.borderW;
+
+        ctx.strokeRect(o.x, o.y, o.w, o.h);
     }
 }
 
@@ -255,7 +255,6 @@ function regenerateUI() {
 
     ui = [
         createZoomButton(),
-        createCurrentToolButton(),
         ... createAtlasList(),
         ... createAtlasTiles(),
     ];
@@ -294,29 +293,6 @@ function onZoomButtonClick(x: ReturnType<typeof createZoomButton>) {
     if (gridSize > 128) {
         gridSize = 16;
     }
-}
-
-function createCurrentToolButton(): Button<undefined> {
-    const aw = (width < 600) ? 90 : 150;
-    const zh = (width < 600) ? 12  : 21;
-
-    return {
-        kind: 'button',
-        id: 'zoomButton',
-        data: undefined,
-        x: width - aw - toolSize - 5,
-        y: toolOffset + 15 + zh,
-        w: toolSize,
-        h: toolSize,
-        color: 'darkgray',
-        borderW: 1,
-        get inner(): ImageSlice {
-            return currentTile
-                ? { kind: 'image', src: curAtlas, dx: currentTile.x * sliceSize, dy: currentTile.y * sliceSize, w: sliceSize, h: sliceSize }
-                : { kind: 'image', src: 'img/empty.png', dx: 0, dy: 0, w: 360, h: 360 };
-        },
-        onClick: onEscape
-    };
 }
 
 function createAtlasList(): Button<undefined>[] {
@@ -382,8 +358,8 @@ function createAtlasTiles(): Button<{x: number, y: number}>[] {
             y: toolOffset + 10 + ty * (toolSize + 5),
             w: toolSize,
             h: toolSize,
-            color: 'darkgray',
-            borderW: 0,
+            color: '#cc0909',
+            get borderW() { return currentTile === this.data ? 2 : 0 },
             inner: {
                 kind: 'image',
                 src: curAtlas,
@@ -402,5 +378,7 @@ function createAtlasTiles(): Button<{x: number, y: number}>[] {
 }
 
 function onAtlasTileClick(x: ReturnType<typeof createAtlasTiles>[0]) {
-    currentTile = x.data;
+    currentTile = currentTile === x.data
+        ? undefined
+        : x.data;
 }
