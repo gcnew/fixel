@@ -89,16 +89,23 @@ export function setup() {
         gridSize = clamp(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
     });
 
-    let touchId: number | undefined;
     let touchY: number;
-    canvas.addEventListener('touchstart', e => {
+    let touchId: number | undefined;
+    let lastT = 0;
+
+    window.addEventListener('touchstart', e => {
+        // this disables two-finger zooming on safari
+        if ('scale' in e && (e as any).scale !== 1) {
+            e.preventDefault();
+        }
+
         if (e.touches.length === 2) {
             touchId = e.touches[0].identifier;
             touchY = e.touches[0].screenY;
         }
-    });
+    }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 
-    canvas.addEventListener('touchmove', e => {
+    window.addEventListener('touchmove', e => {
         // this disables two-finger zooming on safari
         if ('scale' in e && (e as any).scale !== 1) {
             e.preventDefault();
@@ -109,15 +116,25 @@ export function setup() {
             return;
         }
 
-        const deltaY = (touchY - touch.screenY) / 15 | 0;
+        const deltaY = touchY - touch.screenY;
         touchY = touch.screenY;
 
+        if (Date.now() - lastT < 50) {
+            return;
+        }
+
+        lastT = Date.now();
         gridSize = clamp(gridSize + (deltaY > 0 ? 16 : -16), 16, 128);
     }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 
-    canvas.addEventListener('touchend', e => {
+    window.addEventListener('touchend', e => {
+        // this disables two-finger zooming on safari
+        if ('scale' in e && (e as any).scale !== 1) {
+            e.preventDefault();
+        }
+
         touchId = undefined;
-    });
+    }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 
     loadAtlases();
 }
