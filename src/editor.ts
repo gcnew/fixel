@@ -330,6 +330,7 @@ function createAtlasList(): Button<undefined>[] {
 
 function onAtlasButtonClick(x: ReturnType<typeof createAtlasList>[0]) {
     curAtlas = x.id;
+    currentTile = undefined;
     regenerateUI();
 }
 
