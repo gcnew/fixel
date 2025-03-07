@@ -420,7 +420,8 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
             if (!touch) {
                 return;
             }
-            const deltaY = touchY - touch.screenY;
+            const deltaY = (touchY - touch.screenY) / 15 | 0;
+            touchY = touch.screenY;
             gridSize = (0, util_2.clamp)(gridSize + (deltaY > 0 ? 16 : -16), 16, 128);
         }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
         engine_1.canvas.addEventListener('touchend', e => {
