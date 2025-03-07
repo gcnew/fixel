@@ -95,9 +95,7 @@ export function setup() {
 
     window.addEventListener('touchstart', e => {
         // this disables two-finger zooming on safari
-        if ('scale' in e && (e as any).scale !== 1) {
-            e.preventDefault();
-        }
+        e.preventDefault();
 
         if (e.touches.length === 2) {
             touchId = e.touches[0].identifier;
@@ -107,9 +105,7 @@ export function setup() {
 
     window.addEventListener('touchmove', e => {
         // this disables two-finger zooming on safari
-        if ('scale' in e && (e as any).scale !== 1) {
-            e.preventDefault();
-        }
+        e.preventDefault();
 
         const touch = [... e.touches].find(t => t.identifier === touchId);
         if (!touch) {
@@ -119,7 +115,7 @@ export function setup() {
         const deltaY = touchY - touch.screenY;
         touchY = touch.screenY;
 
-        if (Date.now() - lastT < 50) {
+        if (Date.now() - lastT < 100) {
             return;
         }
 
@@ -129,9 +125,7 @@ export function setup() {
 
     window.addEventListener('touchend', e => {
         // this disables two-finger zooming on safari
-        if ('scale' in e && (e as any).scale !== 1) {
-            e.preventDefault();
-        }
+        e.preventDefault();
 
         touchId = undefined;
     }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
