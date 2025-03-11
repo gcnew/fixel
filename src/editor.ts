@@ -2,7 +2,8 @@
 import {
     canvas, ctx,
 
-    width, height, mouseX, mouseY, pressedKeys, listen, unlisten, registerShortcuts, removeShortcuts, addDebugMsg
+    width, height, mouseX, mouseY, pressedKeys, debug,
+    listen, unlisten, registerShortcuts, removeShortcuts, addDebugMsg
 } from './engine'
 
 import { clamp } from 'util'
@@ -39,7 +40,6 @@ const atlasPaths = [
     'img/wood-bridge.png',
 ];
 
-
 const assetPaths = [
     'img/empty.png',
     ... atlasPaths
@@ -57,6 +57,125 @@ let toolOffset: number;
 let objects: { x: number, y: number, tileX: number, tileY: number, atlas: string }[] = [];
 
 let ui: UI<any>[] = [];
+let layoutDataCache: { [id: string]: LayoutData } = {};
+
+const computedStyles: { [id: string]: ComputedStyle } = {
+    '#tools-container': {
+        get x() {
+            const aw = (width < 600) ? 90 : 150;
+            const w = (width < 600) ? 35 : 50;
+
+            return width - w - aw;
+        },
+
+        get y() {
+            return toolOffset + 10;
+        },
+
+        get w() {
+            const aw = (width < 600) ? 90 : 150;
+            const w = (width < 600) ? 35 : 50;
+
+            return aw + w - 1;
+        },
+
+        get h() {
+            return height - toolOffset - 10 - 1;
+        },
+    },
+
+    '#atlas-list-container': {
+        get w() {
+            const w = (width < 600) ? 90 : 150;
+            return w;
+        },
+
+        get h() {
+            return height - toolOffset - 10 - 1;
+        }
+    },
+
+    'zoom-button': {
+        get w() {
+            const w = (width < 600) ? 35 : 50;
+            return  w - 5;
+        },
+
+        get h() {
+            return (width < 600) ? 12  : 21;
+        },
+
+        get color() {
+            return 'darkgray';
+        },
+
+        get font() {
+            return (width < 600) ? '9px monospace' : '14px monospace';
+        },
+
+        get borderW() {
+            return 1
+        },
+
+        get borderColor() {
+            return 'darkgray';
+        },
+    },
+
+    '.atlas-list-button': {
+        get w() {
+            const w = (width < 600) ? 90 : 150;
+            return w - 1;
+        },
+
+        get h() {
+            return (width < 600) ? 12  : 21;
+        },
+
+        get borderW() {
+            return 1;
+        },
+
+        get borderColor() {
+            return 'darkgray';
+        },
+
+        get font() {
+            return (width < 600) ? '9px monospace' : '14px monospace';
+        },
+
+        get color() {
+            return 'darkgray';
+        },
+    },
+
+    '.atlas-list-button-active': {
+        get w() {
+            const w = (width < 600) ? 90 : 150;
+            return w - 1;
+        },
+
+        get h() {
+            return (width < 600) ? 12  : 21;
+        },
+
+        get borderW() {
+            return 1;
+        },
+
+        get borderColor() {
+            return 'darkgray';
+        },
+
+        get font() {
+            return (width < 600) ? '9px monospace' : '14px monospace';
+        },
+
+        get color() {
+            return 'floralwhite';
+        },
+    }
+};
 
 let curAtlas = 'img/grass.png';
 let currentTile: { x: number, y: number } | undefined;
@@ -64,10 +183,36 @@ let currentTile: { x: number, y: number } | undefined;
 type ImageSlice = { kind: 'image', src: string, dx: number, dy: number, w: number, h: number }
 type TextProps  = { kind: 'text', text: string, font: string, color: string }
 
-type UI<T> = Button<T>
+type LayoutData = {
+    x: number,
+    y: number,
 
-type Button<T> = {
-    kind: 'button',
+    w?: number,
+    h?: number,
+    color?: string,
+    font?: string,
+    borderW?: number,
+    borderColor?: string,
+}
+
+type ComputedStyle = {
+    x?: number,
+    y?: number,
+
+    w?: number,
+    h?: number,
+    color?: string,
+    font?: string,
+    borderW?: number,
+    borderColor?: string,
+}
+
+type UI<T> = Button<T>
+           | AutoContainer<T>
+           | OldButton<T>
+
+type OldButton<T> = {
+    kind: 'old-button',
     id: string,
     data: T,
     x: number,
@@ -77,7 +222,25 @@ type Button<T> = {
     color: string,
     borderW: number,
     inner: ImageSlice | TextProps,
-    onClick: (o: Button<T>) => void
+    onClick: (o: OldButton<T>) => void,
+}
+
+type Button<T> = {
+    kind: 'button',
+    id: string,
+    data: T,
+    style: string | undefined,
+    inner: ImageSlice
+        | { kind: 'text', text: string, font?: string, color?: string },
+    onClick: (o: Button<T>) => void,
+}
+
+type AutoContainer<T> = {
+    kind: 'auto-container',
+    id: string,
+    mode: 'column' | 'row',
+    children: UI<T>[],
+    style: string | undefined,
 }
 
 export function setup() {
@@ -178,7 +341,7 @@ export function draw(dt: number) {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, width, height);
 
-    drawUI();
+    drawUI(ui);
     drawGrid();
     drawObjects();
     drawCursor();
@@ -211,15 +374,43 @@ function drawGrid() {
     ctx.fillRect(0, toolOffset, width, 1);
 }
 
-function drawUI() {
+function drawUI(ui: UI<unknown>[]) {
     for (const o of ui) {
         switch (o.kind) {
             case 'button': drawButton(o); break;
+            case 'old-button': drawOldButton(o); break;
+            case 'auto-container': drawAutoContainer(o);
         }
     }
 }
 
 function drawButton(o: Button<unknown>) {
+    const ld = layoutDataCache[o.id];
+
+    if (o.inner.kind === 'text') {
+        ctx.fillStyle = ld.color || 'aqua';       // TODO: [styles]
+        ctx.font = ld.font || '12px monospace';   // TODO: [styles]
+
+        const dims = ctx.measureText(o.inner.text);
+        const ch = Math.round((ld.h! - dims.actualBoundingBoxAscent) / 2);   // TODO: [styles]
+        ctx.fillText(o.inner.text, ld.x + ld.w! - dims.width - 4 | 0, ld.y + dims.actualBoundingBoxAscent + ch | 0); // TODO: [styles]
+    }
+
+    if (o.inner.kind === 'image') {
+        const atlas = loadedAtlases[o.inner.src];
+
+        ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, ld.x, ld.y, ld.w!, ld.h!); // TODO: [styles]
+    }
+
+    if (ld.borderW) {
+        ctx.strokeStyle = ld.borderColor || 'aqua';  // TODO: [styles]
+        ctx.lineWidth = ld.borderW;
+
+        ctx.strokeRect(ld.x, ld.y, ld.w!, ld.h!);    // TODO: [styles]
+    }
+}
+
+function drawOldButton(o: OldButton<unknown>) {
     if (o.inner.kind === 'text') {
         ctx.fillStyle = o.inner.color;
         ctx.font = o.inner.font;
@@ -241,6 +432,56 @@ function drawButton(o: Button<unknown>) {
 
         ctx.strokeRect(o.x, o.y, o.w, o.h);
     }
+}
+
+function drawAutoContainer(o: AutoContainer<unknown>) {
+    const ld = getOrCreateLayout(o);
+    if (debug) {
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(ld.x!, ld.y!, ld.w!, ld.h!);    // TODO: [styles]
+    }
+
+    let dy = 0;
+    let dx = 0;
+    for (const c of o.children) {
+        const childLd = getOrCreateLayout(c);
+
+        childLd.x = ld.x! + dx;  // TODO: [styles]
+        childLd.y = ld.y! + dy;  // TODO: [styles]
+
+        if (o.mode === 'column') {
+            dy += childLd.h!;    // TODO: [styles]
+        } else {
+            dx += childLd.w!;    // TODO: [styles]
+        }
+    }
+
+    drawUI(o.children);
+}
+
+function getOrCreateLayout(o: UI<unknown>): LayoutData {
+    const existing = layoutDataCache[o.id];
+    if (existing) {
+        return existing;
+    }
+
+    if (o.kind === 'old-button') {
+        return { x: 0, y: 0 };
+    }
+
+    const style = o.style !== undefined
+        ? computedStyles[o.style]
+        : undefined;
+
+    let ld = { x: 0, y: 0 };
+    if (style) {
+        ld = Object.create(style);   // TODO: [styles]
+        //ld.x = ld.y = 0;             // TODO: [styles]
+    }
+
+    layoutDataCache[o.id] = ld;
+    return ld;
 }
 
 function drawObjects() {
@@ -272,14 +513,7 @@ function onEscape() {
 }
 
 function onClickHandler() {
-    for (const o of ui) {
-        if (mouseX >= o.x && mouseX <= o.x + o.w
-            && mouseY >= o.y && mouseY <= o.y + o.h) {
-
-            o.onClick(o);
-            break;
-        }
-    }
+    handleClickUI(ui);
 
     if (mouseY <= toolOffset) {
         if (!currentTile) {
@@ -294,6 +528,44 @@ function onClickHandler() {
     }
 }
 
+function handleClickUI(ui: UI<unknown>[]): boolean {
+    for (const o of ui) {
+        switch (o.kind) {
+            case 'auto-container': {
+                if (handleClickUI(o.children)) {
+                    return true;
+                }
+
+                break;
+            }
+
+            case 'button': {
+                const ld = layoutDataCache[o.id];
+
+                if (mouseX >= ld.x && mouseX <= ld.x + ld.w!        // TODO: [styles]
+                    && mouseY >= ld.y && mouseY <= ld.y + ld.h!) {  // TODO: [styles]
+
+                    o.onClick(o);
+                    return true;
+                }
+
+                break;
+            }
+
+            case 'old-button': {
+                if (mouseX >= o.x && mouseX <= o.x + o.w
+                    && mouseY >= o.y && mouseY <= o.y + o.h) {
+
+                    o.onClick(o);
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
 function regenerateUI() {
     if (loading) {
         return;
@@ -305,53 +577,45 @@ function regenerateUI() {
     toolOffset = height - (toolSize + 5) * 4 - 5 - 5;
 
     ui = [
-        createZoomButton(),
-        ... createAtlasList(),
+        createToolsContainer(),
         ... createAtlasTiles(),
     ];
 }
 
-function createZoomButton(): Button<undefined> {
-    const aw = (width < 600) ? 90 : 150;
-    const w = (width < 600) ? 35 : 50;
-    const h = (width < 600) ? 12  : 21;
-    const font = (width < 600) ? '9px monospace' : '14px monospace';
-
-    return {
-        kind: 'button',
-        id: 'zoomButton',
-        data: undefined,
-        x: width - aw - w,
-        y: toolOffset + 10,
-        w: w - 5,
-        h,
-        color: 'darkgray',
-        borderW: 1,
-        inner: {
-            kind: 'text',
-            get text() {
-                return 'x' + gridSize;
-            },
-            font,
-            color: 'darkgray'
-        },
-        onClick: onZoomButtonClick
+function createToolsContainer(): AutoContainer<any> {
+    const container: AutoContainer<undefined> = {
+        kind: 'auto-container',
+        id: 'tools-container',
+        mode: 'row',
+        children: [ zoomButton, createAtlasList() ],
+        style: '#tools-container',
     };
+
+    return container;
 }
 
-function onZoomButtonClick(x: ReturnType<typeof createZoomButton>) {
-    gridSize = gridSize + 16;
-    if (gridSize > 128) {
-        gridSize = 16;
+const zoomButton: Button<undefined> = {
+    kind: 'button',
+    id: 'zoomButton',
+    data: undefined,
+    style: 'zoom-button',
+    inner: {
+        kind: 'text',
+        get text() {
+            return 'x' + gridSize;
+        }
+    },
+
+    onClick: () => {
+        gridSize = gridSize + 16;
+        if (gridSize > 128) {
+            gridSize = 16;
+        }
     }
-}
+};
 
-function createAtlasList(): Button<undefined>[] {
-    const w = (width < 600) ? 90 : 150;
-    const h = (width < 600) ? 12  : 21;
-    const font = (width < 600) ? '9px monospace' : '14px monospace';
-
-    return atlasPaths.map<Button<undefined>>((path, i) => {
+function createAtlasList(): AutoContainer<undefined> {
+    const list = atlasPaths.map<Button<undefined>>((path, i) => {
         const text = path
             .replace('img/', '')
             .replace('.png', '');
@@ -360,32 +624,34 @@ function createAtlasList(): Button<undefined>[] {
             kind: 'button',
             id: path,
             data: undefined,
-            x: width - w,
-            y: toolOffset + 10 + i * h,
-            w: w - 1,
-            h: h,
-            color: 'darkgray',
-            borderW: 1,
-            inner: {
-                kind: 'text',
-                text,
-                font,
-                get color() {
-                    return path === curAtlas ? 'floralwhite' : 'darkgray';
-                }
+
+            get style() {
+                return curAtlas === path ? '.atlas-list-button-active' : '.atlas-list-button';
             },
+
+            inner: { kind: 'text', text },
             onClick: onAtlasButtonClick
         };
     });
+
+    const container: AutoContainer<undefined> = {
+        kind: 'auto-container',
+        id: 'atlas-list-container',
+        mode: 'column',
+        children: list,
+        style: '#atlas-list-container',
+    };
+
+    return container;
 }
 
-function onAtlasButtonClick(x: ReturnType<typeof createAtlasList>[0]) {
+function onAtlasButtonClick(x: Button<undefined>) {
     curAtlas = x.id;
     currentTile = undefined;
     regenerateUI();
 }
 
-function createAtlasTiles(): Button<{x: number, y: number}>[] {
+function createAtlasTiles(): OldButton<{x: number, y: number}>[] {
 
     const atlas = loadedAtlases[curAtlas];
 
@@ -402,8 +668,8 @@ function createAtlasTiles(): Button<{x: number, y: number}>[] {
         const tx = Math.floor(ay / 4) * aw + ax;
         const ty = ay % 4;
 
-        const btn: Button<{x: number, y: number}> = {
-            kind: 'button',
+        const btn: OldButton<{x: number, y: number}> = {
+            kind: 'old-button',
             id: 'btn:' + ax + ':' + ay,
             data: { x: ax, y: ay },
             x: 5 + tx * (toolSize + 5),
