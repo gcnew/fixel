@@ -15,18 +15,30 @@ const KbShortcuts: Shortcut[] = [
 ];
 
 const atlasPaths = [
+    'img/chest.png',
+    'img/chicken-house.png',
     'img/dirt-v2.png',
     'img/dirt-wide-v2.png',
     'img/dirt-wide.png',
     'img/dirt.png',
     'img/doors.png',
+    'img/egg.png',
+    'img/empty.png',
     'img/fences.png',
+    'img/furniture.png',
+    'img/grass-biom-things.png',
     'img/grass.png',
     'img/hills.png',
     'img/house-roof.png',
     'img/house-walls.png',
+    'img/milk-and-grass-item.png',
+    'img/paths.png',
+    'img/plants.png',
+    'img/tools-and-meterials.png',
     'img/water.png',
+    'img/wood-bridge.png',
 ];
+
 
 const assetPaths = [
     'img/empty.png',
