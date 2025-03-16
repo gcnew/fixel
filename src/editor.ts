@@ -6,7 +6,9 @@ import {
     listen, unlisten, registerShortcuts, removeShortcuts, addDebugMsg
 } from './engine'
 
-import { clamp } from 'util'
+import { compileStyle } from './mini-css'
+
+import { clamp } from './util'
 
 import type { Shortcut } from './keyboard'
 
@@ -56,129 +58,66 @@ let toolOffset: number;
 
 let objects: { x: number, y: number, tileX: number, tileY: number, atlas: string }[] = [];
 
+let curAtlas = 'img/grass.png';
+let currentTile: { x: number, y: number } | undefined;
+
 let ui: UI<any>[] = [];
 let layoutDataCache: { [id: string]: LayoutData } = {};
 
-const computedStyles: { [id: string]: ComputedStyle } = {
-    '#tools-container': {
-        get x() {
-            const aw = (width < 600) ? 90 : 150;
-            const w = (width < 600) ? 35 : 50;
-
-            return width - w - aw;
-        },
-
-        get y() {
-            return toolOffset + 10;
-        },
-
-        get w() {
-            const aw = (width < 600) ? 90 : 150;
-            const w = (width < 600) ? 35 : 50;
-
-            return aw + w - 1;
-        },
-
-        get h() {
-            return height - toolOffset - 10 - 1;
-        },
+const styleContext = {
+    get height() {
+        return height;
     },
 
-    '#atlas-list-container': {
-        get w() {
-            const w = (width < 600) ? 90 : 150;
-            return w;
-        },
-
-        get h() {
-            return height - toolOffset - 10 - 1;
-        }
+    get width() {
+        return width;
     },
 
-    'zoom-button': {
-        get w() {
-            const w = (width < 600) ? 35 : 50;
-            return  w - 5;
-        },
-
-        get h() {
-            return (width < 600) ? 12  : 21;
-        },
-
-        get color() {
-            return 'darkgray';
-        },
-
-        get font() {
-            return (width < 600) ? '9px monospace' : '14px monospace';
-        },
-
-        get borderW() {
-            return 1
-        },
-
-        get borderColor() {
-            return 'darkgray';
-        },
-    },
-
-    '.atlas-list-button': {
-        get w() {
-            const w = (width < 600) ? 90 : 150;
-            return w - 1;
-        },
-
-        get h() {
-            return (width < 600) ? 12  : 21;
-        },
-
-        get borderW() {
-            return 1;
-        },
-
-        get borderColor() {
-            return 'darkgray';
-        },
-
-        get font() {
-            return (width < 600) ? '9px monospace' : '14px monospace';
-        },
-
-        get color() {
-            return 'darkgray';
-        },
-    },
-
-    '.atlas-list-button-active': {
-        get w() {
-            const w = (width < 600) ? 90 : 150;
-            return w - 1;
-        },
-
-        get h() {
-            return (width < 600) ? 12  : 21;
-        },
-
-        get borderW() {
-            return 1;
-        },
-
-        get borderColor() {
-            return 'darkgray';
-        },
-
-        get font() {
-            return (width < 600) ? '9px monospace' : '14px monospace';
-        },
-
-        get color() {
-            return 'floralwhite';
-        },
+    get toolSize() {
+        return toolSize;
     }
 };
 
-let curAtlas = 'img/grass.png';
-let currentTile: { x: number, y: number } | undefined;
+const styles = compileStyle<UiStyle>(styleContext, `
+
+    toolOffset = height - (toolSize + 5) * 4 - 5 - 5;
+
+    #tools-container {
+        x: (width < 600) ? width - 125 : width - 200;
+        y: toolOffset + 10;
+        w: (width < 600) ? 124 : 199;
+        h: height - toolOffset - 10 - 1;
+    }
+
+    #atlas-list-container {
+        w: (width < 600) ? 90 : 150;
+        h: height - toolOffset - 10 - 1;
+    }
+
+    #zoom-button {
+        w: (width < 600) ? 30 : 45;
+        h: (width < 600) ? 12 : 21;
+        color: 'darkgray';
+        font: (width < 600) ? '9px monospace' : '14px monospace';
+        borderW: 1;
+        borderColor: 'darkgray';
+        marginRight: 5;
+    }
+
+    .atlas-list-button {
+        w: (width < 600) ? 89 : 149;
+        h: (width < 600) ? 12 : 21;
+        borderW: 1;
+        borderColor: 'darkgray';
+        font: (width < 600) ? '9px monospace' : '14px monospace';
+        color: 'darkgray';
+    }
+
+    .atlas-list-button-active {
+        ... .atlas-list-button;
+        color: 'floralwhite';
+    }
+`);
 
 type ImageSlice = { kind: 'image', src: string, dx: number, dy: number, w: number, h: number }
 type TextProps  = { kind: 'text', text: string, font: string, color: string }
@@ -195,7 +134,7 @@ type LayoutData = {
     borderColor?: string,
 }
 
-type ComputedStyle = {
+type UiStyle = {
     x?: number,
     y?: number,
 
@@ -471,7 +410,7 @@ function getOrCreateLayout(o: UI<unknown>): LayoutData {
     }
 
     const style = o.style !== undefined
-        ? computedStyles[o.style]
+        ? styles[o.style]
         : undefined;
 
     let ld = { x: 0, y: 0 };
@@ -598,7 +537,7 @@ const zoomButton: Button<undefined> = {
     kind: 'button',
     id: 'zoomButton',
     data: undefined,
-    style: 'zoom-button',
+    style: '#zoom-button',
     inner: {
         kind: 'text',
         get text() {
