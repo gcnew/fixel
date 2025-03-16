@@ -178,7 +178,7 @@ type AutoContainer<T> = {
     kind: 'auto-container',
     id: string,
     mode: 'column' | 'row',
-    children: UI<T>[],
+    children: Exclude<UI<T>, { kind: 'old-button' }>[],
     style: string | undefined,
 }
 
@@ -324,7 +324,7 @@ function drawUI(ui: UI<unknown>[]) {
 }
 
 function drawButton(o: Button<unknown>) {
-    const ld = layoutDataCache[o.id];
+    const ld = getOrCreateLayout(o);
 
     if (o.inner.kind === 'text') {
         ctx.fillStyle = ld.color || 'aqua';       // TODO: [styles]
@@ -399,14 +399,11 @@ function drawAutoContainer(o: AutoContainer<unknown>) {
     drawUI(o.children);
 }
 
-function getOrCreateLayout(o: UI<unknown>): LayoutData {
-    const existing = layoutDataCache[o.id];
+function getOrCreateLayout(o: Button<unknown> | AutoContainer<unknown>): LayoutData {
+    const key = o.id + o.style;
+    const existing = layoutDataCache[key];
     if (existing) {
         return existing;
-    }
-
-    if (o.kind === 'old-button') {
-        return { x: 0, y: 0 };
     }
 
     const style = o.style !== undefined
@@ -419,7 +416,7 @@ function getOrCreateLayout(o: UI<unknown>): LayoutData {
         //ld.x = ld.y = 0;             // TODO: [styles]
     }
 
-    layoutDataCache[o.id] = ld;
+    layoutDataCache[key] = ld;
     return ld;
 }
 
@@ -479,7 +476,7 @@ function handleClickUI(ui: UI<unknown>[]): boolean {
             }
 
             case 'button': {
-                const ld = layoutDataCache[o.id];
+                const ld = getOrCreateLayout(o);
 
                 if (mouseX >= ld.x && mouseX <= ld.x + ld.w!        // TODO: [styles]
                     && mouseY >= ld.y && mouseY <= ld.y + ld.h!) {  // TODO: [styles]
@@ -521,7 +518,7 @@ function regenerateUI() {
     ];
 }
 
-function createToolsContainer(): AutoContainer<any> {
+function createToolsContainer() {
     const container: AutoContainer<undefined> = {
         kind: 'auto-container',
         id: 'tools-container',
