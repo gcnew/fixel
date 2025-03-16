@@ -355,7 +355,121 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
         }
     }
 });
-define("editor", ["require", "exports", "engine", "util"], function (require, exports, engine_1, util_2) {
+define("mini-css", ["require", "exports"], function (require, exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.compileStyle = void 0;
+    function compileStyle(ctx0, style) {
+        const vars = [];
+        const rules = [];
+        const left = style
+            .trim()
+            .replaceAll(/[a-z_]+\s*=[^;]*?;/gi, matched => {
+            const compiled = compileVar(matched);
+            if (!compiled) {
+                return matched;
+            }
+            vars.push(compiled);
+            return '';
+        })
+            .replaceAll(/[#.]?[a-z-_]+\s*{[^}]+?}/gi, matched => {
+            const compiled = compileRule(matched);
+            if (!compiled) {
+                return matched;
+            }
+            rules.push(compiled);
+            return '';
+        });
+        if (left.trim()) {
+            console.warn(`Styles not fully parsed: <<<${left}>>>`);
+        }
+        const ctx = Object.create(Object.create(null), Object.getOwnPropertyDescriptors(ctx0));
+        const varsEntries = vars.map(x => [x.name, { get: x.func }]);
+        Object.defineProperties(ctx, Object.fromEntries(varsEntries));
+        const rulesEntries = rules.map(x => {
+            const final = applyExtends(x, rules, []);
+            const propEntries = final.props.map(x => [x.name, { get: x.func }]);
+            // TODO: this might not be ideal; in the perfect case we should not be copying the ctx properties to every style
+            // also, it can be flattened instead of Object.create(ctx)
+            const props = Object.defineProperties(Object.create(ctx), Object.fromEntries(propEntries));
+            return [x.name, { value: props }];
+        });
+        return Object.defineProperties(Object.create(null), Object.fromEntries(rulesEntries));
+    }
+    exports.compileStyle = compileStyle;
+    function compileVar(def) {
+        const [_, name, expr] = /([a-z_]+)\s*=\s*([^;]*?;)/gi.exec(def) || [];
+        if (!name) {
+            return undefined;
+        }
+        const func = compileExpr(expr);
+        if (!func) {
+            return undefined;
+        }
+        return { name, func };
+    }
+    function compileRule(def) {
+        const [_, name, body] = /([#.]?[a-z-_]+)\s*{([^}]+?)}/gi.exec(def) || [];
+        if (!name) {
+            return undefined;
+        }
+        const exts = [];
+        const props = [];
+        const left = body
+            .trim()
+            .replaceAll(/\.\.\. *([#.]?[a-z-_]+);/gi, (_, name) => {
+            exts.push(name);
+            return '';
+        })
+            .replaceAll(/([a-z_]+)\s*:([^;]*?;)/gi, (matched, name, expr) => {
+            const func = compileExpr(expr);
+            if (!func) {
+                return matched;
+            }
+            props.push({ name, func });
+            return '';
+        });
+        if (left.trim()) {
+            console.warn(`Rule \`${name}\` not fully compiled: <<<${left}>>>`);
+        }
+        return { name: name, extends: exts, props };
+    }
+    function compileExpr(expr) {
+        const saved = [];
+        const fixed = expr.trim()
+            .replace(/'[^']*?'/g, matched => {
+            saved.push(matched);
+            return `___SAVED___`;
+        })
+            .replace(/[a-z_]+/gi, 'this.$&')
+            .replace(/this\.___SAVED___/g, () => {
+            return saved.shift();
+        });
+        return Function(`return ${fixed}`);
+    }
+    function applyExtends(x, xs, applied0) {
+        if (!x.extends) {
+            return x;
+        }
+        const finalProps = [];
+        const applied = [...applied0, x.name];
+        for (const ext of x.extends) {
+            if (applied.includes(ext)) {
+                continue;
+            }
+            const rule = xs.find(x => x.name === ext);
+            if (!rule) {
+                console.warn(`Cannot find rule \`${ext}\` referenced by \`${x.name}\``);
+                continue;
+            }
+            const extended = applyExtends(rule, xs, applied);
+            finalProps.push(...extended.props);
+        }
+        finalProps.push(...x.props);
+        return { name: x.name, extends: x.extends, props: finalProps };
+    }
+});
+define("editor", ["require", "exports", "engine", "mini-css", "util"], function (require, exports, engine_1, mini_css_1, util_2) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.draw = exports.tearDown = exports.setup = void 0;
@@ -363,17 +477,28 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         [onEscape, 'ESC'],
     ];
     const atlasPaths = [
+        'img/chest.png',
+        'img/chicken-house.png',
         'img/dirt-v2.png',
         'img/dirt-wide-v2.png',
         'img/dirt-wide.png',
         'img/dirt.png',
         'img/doors.png',
+        'img/egg.png',
+        'img/empty.png',
         'img/fences.png',
+        'img/furniture.png',
+        'img/grass-biom-things.png',
         'img/grass.png',
         'img/hills.png',
         'img/house-roof.png',
         'img/house-walls.png',
+        'img/milk-and-grass-item.png',
+        'img/paths.png',
+        'img/plants.png',
+        'img/tools-and-meterials.png',
         'img/water.png',
+        'img/wood-bridge.png',
     ];
     const assetPaths = [
         'img/empty.png',
@@ -386,9 +511,64 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
     let sliceSize = 16;
     let toolOffset;
     let objects = [];
-    let ui = [];
     let curAtlas = 'img/grass.png';
     let currentTile;
+    let ui = [];
+    let layoutDataCache = {};
+    const styleContext = {
+        get height() {
+            return engine_1.height;
+        },
+        get width() {
+            return engine_1.width;
+        },
+        get toolSize() {
+            return toolSize;
+        }
+    };
+    const styles = (0, mini_css_1.compileStyle)(styleContext, `
+
+    toolOffset = height - (toolSize + 5) * 4 - 5 - 5;
+
+    #tools-container {
+        x: (width < 600) ? width - 125 : width - 200;
+        y: toolOffset + 10;
+        w: (width < 600) ? 124 : 199;
+        h: height - toolOffset - 10 - 1;
+        gap: 5;
+    }
+
+    #atlas-list-container {
+        w: (width < 600) ? 90 : 150;
+        h: height - toolOffset - 10 - 1;
+
+        scroll: 'y';
+    }
+
+    #zoom-button {
+        w: (width < 600) ? 30 : 45;
+        h: (width < 600) ? 12 : 21;
+        color: 'darkgray';
+        font: (width < 600) ? '9px monospace' : '14px monospace';
+        borderW: 1;
+        borderColor: 'darkgray';
+        marginRight: 5;
+    }
+
+    .atlas-list-button {
+        w: (width < 600) ? 89 : 149;
+        h: (width < 600) ? 12 : 21;
+        borderW: 1;
+        borderColor: 'darkgray';
+        font: (width < 600) ? '9px monospace' : '14px monospace';
+        color: 'darkgray';
+    }
+
+    .atlas-list-button-active {
+        ... .atlas-list-button;
+        color: 'floralwhite';
+    }
+`);
     function setup() {
         (0, engine_1.registerShortcuts)(KbShortcuts);
         (0, engine_1.listen)('mouseup', onClickHandler);
@@ -401,6 +581,9 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
             return false;
         });
         engine_1.canvas.addEventListener('wheel', e => {
+            if (handleScroll(ui, e.deltaX, e.deltaY)) {
+                return;
+            }
             gridSize = (0, util_2.clamp)(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
         });
         let touchY;
@@ -464,7 +647,7 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         // clear the screen
         engine_1.ctx.fillStyle = '#000';
         engine_1.ctx.fillRect(0, 0, engine_1.width, engine_1.height);
-        drawUI();
+        drawUI(ui);
         drawGrid();
         drawObjects();
         drawCursor();
@@ -489,16 +672,40 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         // the last horizontal line (in case of off-tile height)
         engine_1.ctx.fillRect(0, toolOffset, engine_1.width, 1);
     }
-    function drawUI() {
+    function drawUI(ui) {
         for (const o of ui) {
             switch (o.kind) {
                 case 'button':
                     drawButton(o);
                     break;
+                case 'old-button':
+                    drawOldButton(o);
+                    break;
+                case 'auto-container': drawAutoContainer(o);
             }
         }
     }
     function drawButton(o) {
+        const ld = getOrCreateLayout(o);
+        if (o.inner.kind === 'text') {
+            engine_1.ctx.fillStyle = ld.color || 'aqua'; // TODO: [styles]
+            engine_1.ctx.font = ld.font || '12px monospace'; // TODO: [styles]
+            const dims = engine_1.ctx.measureText(o.inner.text);
+            const ch = Math.round((ld.h - dims.actualBoundingBoxAscent) / 2); // TODO: [styles]
+            const wOffset = Math.max(ld.w - dims.width - 4 | 0, 5);
+            engine_1.ctx.fillText(o.inner.text, ld.x + wOffset, ld.y + dims.actualBoundingBoxAscent + ch | 0, ld.w - 9); // TODO: [styles]
+        }
+        if (o.inner.kind === 'image') {
+            const atlas = loadedAtlases[o.inner.src];
+            engine_1.ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, ld.x, ld.y, ld.w, ld.h); // TODO: [styles]
+        }
+        if (ld.borderW) {
+            engine_1.ctx.strokeStyle = ld.borderColor || 'aqua'; // TODO: [styles]
+            engine_1.ctx.lineWidth = ld.borderW;
+            engine_1.ctx.strokeRect(ld.x, ld.y, ld.w, ld.h); // TODO: [styles]
+        }
+    }
+    function drawOldButton(o) {
         if (o.inner.kind === 'text') {
             engine_1.ctx.fillStyle = o.inner.color;
             engine_1.ctx.font = o.inner.font;
@@ -515,6 +722,59 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
             engine_1.ctx.lineWidth = o.borderW;
             engine_1.ctx.strokeRect(o.x, o.y, o.w, o.h);
         }
+    }
+    function drawAutoContainer(o) {
+        const ld = getOrCreateLayout(o);
+        if (engine_1.debug) {
+            engine_1.ctx.strokeStyle = 'red';
+            engine_1.ctx.lineWidth = 1;
+            engine_1.ctx.strokeRect(ld.x, ld.y, ld.w, ld.h); // TODO: [styles]
+        }
+        if (ld.scroll) {
+            engine_1.ctx.save();
+            engine_1.ctx.beginPath();
+            engine_1.ctx.rect(ld.x - 1, ld.y - 1, ld.w + 1, ld.h + 1); // TODO: [styles]
+            engine_1.ctx.clip();
+        }
+        const gap = ld.gap ?? 0;
+        let dy = 0;
+        let dx = 0;
+        const totalHeight = o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h, 0);
+        const totalWidth = o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w, 0);
+        ld.scrollX = (0, util_2.clamp)(ld.scrollX ?? 0, Math.min(ld.w, totalWidth) - totalWidth, 0);
+        ld.scrollY = (0, util_2.clamp)(ld.scrollY ?? 0, Math.min(ld.h, totalHeight) - totalHeight, 0);
+        for (const c of o.children) {
+            const childLd = getOrCreateLayout(c);
+            childLd.x = ld.x + dx + ld.scrollX; // TODO: [styles]
+            childLd.y = ld.y + dy + ld.scrollY; // TODO: [styles]
+            if (o.mode === 'column') {
+                dy += childLd.h + gap; // TODO: [styles]
+            }
+            else {
+                dx += childLd.w + gap; // TODO: [styles]
+            }
+        }
+        drawUI(o.children);
+        if (ld.scroll) {
+            engine_1.ctx.restore();
+        }
+    }
+    function getOrCreateLayout(o) {
+        const key = o.id + o.style;
+        const existing = layoutDataCache[key];
+        if (existing) {
+            return existing;
+        }
+        const style = o.style !== undefined
+            ? styles[o.style]
+            : undefined;
+        let ld = { x: 0, y: 0 };
+        if (style) {
+            ld = Object.create(style); // TODO: [styles]
+            //ld.x = ld.y = 0;             // TODO: [styles]
+        }
+        layoutDataCache[key] = ld;
+        return ld;
     }
     function drawObjects() {
         for (const o of objects) {
@@ -538,13 +798,7 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         currentTile = undefined;
     }
     function onClickHandler() {
-        for (const o of ui) {
-            if (engine_1.mouseX >= o.x && engine_1.mouseX <= o.x + o.w
-                && engine_1.mouseY >= o.y && engine_1.mouseY <= o.y + o.h) {
-                o.onClick(o);
-                break;
-            }
-        }
+        handleClickUI(ui);
         if (engine_1.mouseY <= toolOffset) {
             if (!currentTile) {
                 return;
@@ -555,6 +809,66 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
             return;
         }
     }
+    function handleClickUI(ui) {
+        for (const o of ui) {
+            switch (o.kind) {
+                case 'auto-container': {
+                    if (handleClickUI(o.children)) {
+                        return true;
+                    }
+                    break;
+                }
+                case 'button': {
+                    const ld = getOrCreateLayout(o);
+                    if (engine_1.mouseX >= ld.x && engine_1.mouseX <= ld.x + ld.w // TODO: [styles]
+                        && engine_1.mouseY >= ld.y && engine_1.mouseY <= ld.y + ld.h) { // TODO: [styles]
+                        o.onClick(o);
+                        return true;
+                    }
+                    break;
+                }
+                case 'old-button': {
+                    if (engine_1.mouseX >= o.x && engine_1.mouseX <= o.x + o.w
+                        && engine_1.mouseY >= o.y && engine_1.mouseY <= o.y + o.h) {
+                        o.onClick(o);
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    function handleScroll(ui, deltaX, deltaY) {
+        for (const o of ui) {
+            switch (o.kind) {
+                case 'button':
+                case 'old-button':
+                    break;
+                case 'auto-container': {
+                    const ld = getOrCreateLayout(o);
+                    if (!(engine_1.mouseX >= ld.x && engine_1.mouseX <= ld.x + ld.w // TODO: [styles]
+                        && engine_1.mouseY >= ld.y && engine_1.mouseY <= ld.y + ld.h)) { // TODO: [styles]
+                        return false;
+                    }
+                    // first try children
+                    if (handleScroll(o.children, deltaX, deltaY)) {
+                        return true;
+                    }
+                    if (!ld.scroll) {
+                        return false;
+                    }
+                    if (ld.scroll === 'x') {
+                        ld.scrollX = (ld.scrollX || 0) + deltaX;
+                    }
+                    else {
+                        ld.scrollY = (ld.scrollY || 0) + deltaY;
+                    }
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
     function regenerateUI() {
         if (loading) {
             return;
@@ -563,48 +877,40 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
         engine_1.ctx.imageSmoothingEnabled = false;
         toolOffset = engine_1.height - (toolSize + 5) * 4 - 5 - 5;
         ui = [
-            createZoomButton(),
-            ...createAtlasList(),
+            createToolsContainer(),
             ...createAtlasTiles(),
         ];
     }
-    function createZoomButton() {
-        const aw = (engine_1.width < 600) ? 90 : 150;
-        const w = (engine_1.width < 600) ? 35 : 50;
-        const h = (engine_1.width < 600) ? 12 : 21;
-        const font = (engine_1.width < 600) ? '9px monospace' : '14px monospace';
-        return {
-            kind: 'button',
-            id: 'zoomButton',
-            data: undefined,
-            x: engine_1.width - aw - w,
-            y: toolOffset + 10,
-            w: w - 5,
-            h,
-            color: 'darkgray',
-            borderW: 1,
-            inner: {
-                kind: 'text',
-                get text() {
-                    return 'x' + gridSize;
-                },
-                font,
-                color: 'darkgray'
-            },
-            onClick: onZoomButtonClick
+    function createToolsContainer() {
+        const container = {
+            kind: 'auto-container',
+            id: 'tools-container',
+            mode: 'row',
+            children: [zoomButton, createAtlasList()],
+            style: '#tools-container',
         };
+        return container;
     }
-    function onZoomButtonClick(x) {
-        gridSize = gridSize + 16;
-        if (gridSize > 128) {
-            gridSize = 16;
+    const zoomButton = {
+        kind: 'button',
+        id: 'zoomButton',
+        data: undefined,
+        style: '#zoom-button',
+        inner: {
+            kind: 'text',
+            get text() {
+                return 'x' + gridSize;
+            }
+        },
+        onClick: () => {
+            gridSize = gridSize + 16;
+            if (gridSize > 128) {
+                gridSize = 16;
+            }
         }
-    }
+    };
     function createAtlasList() {
-        const w = (engine_1.width < 600) ? 90 : 150;
-        const h = (engine_1.width < 600) ? 12 : 21;
-        const font = (engine_1.width < 600) ? '9px monospace' : '14px monospace';
-        return atlasPaths.map((path, i) => {
+        const list = atlasPaths.map((path, i) => {
             const text = path
                 .replace('img/', '')
                 .replace('.png', '');
@@ -612,23 +918,21 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
                 kind: 'button',
                 id: path,
                 data: undefined,
-                x: engine_1.width - w,
-                y: toolOffset + 10 + i * h,
-                w: w - 1,
-                h: h,
-                color: 'darkgray',
-                borderW: 1,
-                inner: {
-                    kind: 'text',
-                    text,
-                    font,
-                    get color() {
-                        return path === curAtlas ? 'floralwhite' : 'darkgray';
-                    }
+                get style() {
+                    return curAtlas === path ? '.atlas-list-button-active' : '.atlas-list-button';
                 },
+                inner: { kind: 'text', text },
                 onClick: onAtlasButtonClick
             };
         });
+        const container = {
+            kind: 'auto-container',
+            id: 'atlas-list-container',
+            mode: 'column',
+            children: list,
+            style: '#atlas-list-container',
+        };
+        return container;
     }
     function onAtlasButtonClick(x) {
         curAtlas = x.id;
@@ -648,7 +952,7 @@ define("editor", ["require", "exports", "engine", "util"], function (require, ex
             const tx = Math.floor(ay / 4) * aw + ax;
             const ty = ay % 4;
             const btn = {
-                kind: 'button',
+                kind: 'old-button',
                 id: 'btn:' + ax + ':' + ay,
                 data: { x: ax, y: ay },
                 x: 5 + tx * (toolSize + 5),
