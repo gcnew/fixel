@@ -92,6 +92,8 @@ const styles = compileStyle<UiStyle>(styleContext, `
     #atlas-list-container {
         w: (width < 600) ? 90 : 150;
         h: height - toolOffset - 10 - 1;
+
+        scroll: 'y';
     }
 
     #zoom-button {
@@ -132,6 +134,10 @@ type LayoutData = {
     font?: string,
     borderW?: number,
     borderColor?: string,
+
+    scroll?: 'x' | 'y',
+    scrollX?: number,
+    scrollY?: number,
 }
 
 type UiStyle = {
@@ -144,6 +150,8 @@ type UiStyle = {
     font?: string,
     borderW?: number,
     borderColor?: string,
+
+    scroll?: 'x' | 'y',
 }
 
 type UI<T> = Button<T>
@@ -200,6 +208,10 @@ export function setup() {
     });
 
     canvas.addEventListener('wheel', e => {
+        if (handleScroll(ui, e.deltaX, e.deltaY)) {
+            return;
+        }
+
         gridSize = clamp(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
     });
 
@@ -332,7 +344,9 @@ function drawButton(o: Button<unknown>) {
 
         const dims = ctx.measureText(o.inner.text);
         const ch = Math.round((ld.h! - dims.actualBoundingBoxAscent) / 2);   // TODO: [styles]
-        ctx.fillText(o.inner.text, ld.x + ld.w! - dims.width - 4 | 0, ld.y + dims.actualBoundingBoxAscent + ch | 0); // TODO: [styles]
+        const wOffset = Math.max(ld.w! - dims.width - 4 | 0, 5);
+
+        ctx.fillText(o.inner.text, ld.x + wOffset, ld.y + dims.actualBoundingBoxAscent + ch | 0, ld.w! - 9); // TODO: [styles]
     }
 
     if (o.inner.kind === 'image') {
@@ -381,13 +395,25 @@ function drawAutoContainer(o: AutoContainer<unknown>) {
         ctx.strokeRect(ld.x!, ld.y!, ld.w!, ld.h!);    // TODO: [styles]
     }
 
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(ld.x!, ld.y!, ld.w!, ld.h!);    // TODO: [styles]
+    ctx.clip();
+
     let dy = 0;
     let dx = 0;
+
+    const totalHeight = o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h!, 0);
+    const totalWidth = o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w!, 0);
+
+    ld.scrollX = clamp(ld.scrollX ?? 0, ld.w! - totalWidth, 0);
+    ld.scrollY = clamp(ld.scrollY ?? 0, ld.h! - totalHeight, 0);
+
     for (const c of o.children) {
         const childLd = getOrCreateLayout(c);
 
-        childLd.x = ld.x! + dx;  // TODO: [styles]
-        childLd.y = ld.y! + dy;  // TODO: [styles]
+        childLd.x = ld.x! + dx + ld.scrollX;  // TODO: [styles]
+        childLd.y = ld.y! + dy + ld.scrollY;  // TODO: [styles]
 
         if (o.mode === 'column') {
             dy += childLd.h!;    // TODO: [styles]
@@ -397,6 +423,7 @@ function drawAutoContainer(o: AutoContainer<unknown>) {
     }
 
     drawUI(o.children);
+    ctx.restore();
 }
 
 function getOrCreateLayout(o: Button<unknown> | AutoContainer<unknown>): LayoutData {
@@ -495,6 +522,44 @@ function handleClickUI(ui: UI<unknown>[]): boolean {
                     o.onClick(o);
                     return true;
                 }
+            }
+        }
+    }
+
+    return false;
+}
+
+function handleScroll(ui: UI<unknown>[], deltaX: number, deltaY: number): boolean {
+    for (const o of ui) {
+        switch (o.kind) {
+            case 'button':
+            case 'old-button':
+                break;
+
+            case 'auto-container': {
+                const ld = getOrCreateLayout(o);
+
+                if (!(mouseX >= ld.x && mouseX <= ld.x + ld.w!        // TODO: [styles]
+                    && mouseY >= ld.y && mouseY <= ld.y + ld.h!)) {   // TODO: [styles]
+                    return false;
+                }
+
+                // first try children
+                if (handleScroll(o.children, deltaX, deltaY)) {
+                    return true;
+                }
+
+                if (!ld.scroll) {
+                    return false;
+                }
+
+                if (ld.scroll === 'x') {
+                    ld.scrollX = (ld.scrollX || 0) + deltaX;
+                } else {
+                    ld.scrollY = (ld.scrollY || 0) + deltaY;
+                }
+
+                return true;
             }
         }
     }
