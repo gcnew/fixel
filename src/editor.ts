@@ -6,6 +6,8 @@ import {
     listen, unlisten, registerShortcuts, removeShortcuts, addDebugMsg
 } from './engine'
 
+import * as ENG from './engine'
+
 import { compileStyle } from './mini-css'
 
 import { clamp } from './util'
@@ -226,10 +228,13 @@ export function setup() {
         // this disables two-finger zooming on safari
         e.preventDefault();
 
-        if (e.touches.length === 2) {
-            touchId = e.touches[0].identifier;
-            touchY = e.touches[0].screenY;
-        }
+        touchId = e.touches[0].identifier;
+        touchY = e.touches[0].clientY;
+
+        // BIG HACK
+        const ref = ENG;
+        ref.mouseX = e.touches[0].clientX;
+        ref.mouseY = e.touches[0].clientY;
     }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 
     window.addEventListener('touchmove', e => {
@@ -241,13 +246,18 @@ export function setup() {
             return;
         }
 
-        const deltaY = touchY - touch.screenY;
-        if (Date.now() - lastT < 100 || Math.abs(deltaY) < 10) {
+        const deltaY = touch.clientY - touchY;
+        if (Date.now() - lastT < 50 || Math.abs(deltaY) < 10) {
             return;
         }
 
         lastT = Date.now();
-        touchY = touch.screenY;
+        touchY = touch.clientY;
+
+        if (handleScroll(ui, deltaY, deltaY)) {
+            return;
+        }
+
         gridSize = clamp(gridSize + (deltaY > 0 ? 16 : -16), 16, 128);
     }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 
@@ -535,6 +545,10 @@ function handleClickUI(ui: UI<unknown>[]): boolean {
     }
 
     return false;
+}
+
+function onScrollHandler() {
+
 }
 
 function handleScroll(ui: UI<unknown>[], deltaX: number, deltaY: number): boolean {
