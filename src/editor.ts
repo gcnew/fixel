@@ -17,6 +17,7 @@ import type { Shortcut } from './keyboard'
 
 const KbShortcuts: Shortcut[] = [
     [onEscape, 'ESC'],
+    [() => displayBoundingBoxes = !displayBoundingBoxes, ']'],
 ];
 
 const atlasPaths = [
@@ -66,6 +67,8 @@ let currentTile: { x: number, y: number } | undefined;
 let ui: UI<any>[] = [];
 let layoutDataCache: { [id: string]: LayoutData } = {};
 
+let displayBoundingBoxes = false;
+
 const styleContext = {
     get height() {
         return height;
@@ -94,8 +97,10 @@ const styles = compileStyle<UiStyle>(styleContext, `
 
     #atlas-list-container {
         w: (width < 600) ? 90 : 150;
-        h: height - toolOffset - 10 - 1;
+        h: height - toolOffset - 10 - ((width < 600) ? 4 : 3);
 
+        borderW: 1;
+        borderColor: 'darkgray';
         scroll: 'y';
     }
 
@@ -135,7 +140,7 @@ type LayoutData = {
     h?: number,
     color?: string,
     font?: string,
-    borderW?: number,
+    borderW?: string | number,
     borderColor?: string,
     gap?: number,
 
@@ -350,12 +355,61 @@ function drawButton(o: Button<unknown>) {
         ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, ld.x, ld.y, ld.w!, ld.h!); // TODO: [styles]
     }
 
-    if (ld.borderW) {
-        ctx.strokeStyle = ld.borderColor || 'aqua';  // TODO: [styles]
-        ctx.lineWidth = ld.borderW;
+    drawBorder(ld);
+}
 
-        ctx.strokeRect(ld.x, ld.y, ld.w!, ld.h!);    // TODO: [styles]
+function drawBorder(ld: LayoutData) {
+    const borderW = ld.borderW;
+
+    switch (typeof borderW) {
+        case 'undefined': {
+            return;
+        }
+
+        case 'number': {
+            ctx.strokeStyle = ld.borderColor || 'aqua';  // TODO: [styles]
+            ctx.lineWidth = borderW;
+
+            ctx.strokeRect(ld.x, ld.y, ld.w!, ld.h!);    // TODO: [styles]
+            return;
+        }
+
+        case 'string': {
+            let parsed = borderW.split(/\s+/g)
+                .map(Number);
+
+            const strokeStyle = ld.borderColor || 'aqua';  // TODO: [styles]
+
+            if (parsed.length !== 2 && parsed.length !== 4) {
+                console.warn(`Bad border style: ${borderW} ${JSON.stringify(parsed)}`);
+                return;
+            }
+
+            // top|bottom, left|right -> top,right,bottom,left
+            if (parsed.length === 2) {
+                parsed = [parsed[0], parsed[1], parsed[0], parsed[1]];
+            }
+
+            // TODO: [styles]
+            drawLine(ld.x, ld.y, ld.w!, 0, strokeStyle, parsed[0]);
+            drawLine(ld.x + ld.w!, ld.y, 0, ld.h!, strokeStyle, parsed[1]);
+            drawLine(ld.x, ld.y + ld.h!, ld.w!, 0, strokeStyle, parsed[2]);
+            drawLine(ld.x, ld.y, 0, ld.h!, strokeStyle, parsed[3]);
+        }
     }
+}
+
+function drawLine(x: number, y: number, w: number, h: number, strokeStyle: string, lineWidth: number) {
+    if (!lineWidth) {
+        return;
+    }
+
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + w, y + h);
+    ctx.stroke();
 }
 
 function drawOldButton(o: OldButton<unknown>) {
@@ -384,10 +438,10 @@ function drawOldButton(o: OldButton<unknown>) {
 
 function drawAutoContainer(o: AutoContainer<unknown>) {
     const ld = getOrCreateLayout(o);
-    if (debug) {
+    if (displayBoundingBoxes) {
         ctx.strokeStyle = 'red';
         ctx.lineWidth = 1;
-        ctx.strokeRect(ld.x!, ld.y!, ld.w!, ld.h!);    // TODO: [styles]
+        ctx.strokeRect(ld.x! - 1, ld.y! -1, ld.w! + 1, ld.h! + 1);    // TODO: [styles]
     }
 
     if (ld.scroll) {
@@ -424,6 +478,7 @@ function drawAutoContainer(o: AutoContainer<unknown>) {
     if (ld.scroll) {
         ctx.restore();
     }
+    drawBorder(ld);
 }
 
 function getOrCreateLayout(o: Button<unknown> | AutoContainer<unknown>): LayoutData {
