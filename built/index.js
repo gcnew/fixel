@@ -469,10 +469,11 @@ define("mini-css", ["require", "exports"], function (require, exports) {
         return { name: x.name, extends: x.extends, props: finalProps };
     }
 });
-define("editor", ["require", "exports", "engine", "mini-css", "util"], function (require, exports, engine_1, mini_css_1, util_2) {
+define("editor", ["require", "exports", "engine", "engine", "mini-css", "util"], function (require, exports, engine_1, ENG, mini_css_1, util_2) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.draw = exports.tearDown = exports.setup = void 0;
+    ENG = __importStar(ENG);
     const KbShortcuts = [
         [onEscape, 'ESC'],
     ];
@@ -592,10 +593,12 @@ define("editor", ["require", "exports", "engine", "mini-css", "util"], function 
         window.addEventListener('touchstart', e => {
             // this disables two-finger zooming on safari
             e.preventDefault();
-            if (e.touches.length === 2) {
-                touchId = e.touches[0].identifier;
-                touchY = e.touches[0].screenY;
-            }
+            touchId = e.touches[0].identifier;
+            touchY = e.touches[0].clientY;
+            // BIG HACK
+            const ref = ENG;
+            ref.mouseX = e.touches[0].clientX;
+            ref.mouseY = e.touches[0].clientY;
         }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
         window.addEventListener('touchmove', e => {
             // this disables two-finger zooming on safari
@@ -604,12 +607,15 @@ define("editor", ["require", "exports", "engine", "mini-css", "util"], function 
             if (!touch) {
                 return;
             }
-            const deltaY = touchY - touch.screenY;
-            if (Date.now() - lastT < 100 || Math.abs(deltaY) < 10) {
+            const deltaY = touch.clientY - touchY;
+            if (Date.now() - lastT < 50 || Math.abs(deltaY) < 10) {
                 return;
             }
             lastT = Date.now();
-            touchY = touch.screenY;
+            touchY = touch.clientY;
+            if (handleScroll(ui, deltaY, deltaY)) {
+                return;
+            }
             gridSize = (0, util_2.clamp)(gridSize + (deltaY > 0 ? 16 : -16), 16, 128);
         }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
         window.addEventListener('touchend', e => {
@@ -837,6 +843,8 @@ define("editor", ["require", "exports", "engine", "mini-css", "util"], function 
             }
         }
         return false;
+    }
+    function onScrollHandler() {
     }
     function handleScroll(ui, deltaX, deltaY) {
         for (const o of ui) {
