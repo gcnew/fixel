@@ -222,12 +222,9 @@ export function setup() {
 
     let touchY: number;
     let touchId: number | undefined;
-    let lastT = 0;
 
     window.addEventListener('touchstart', e => {
         // this disables two-finger zooming on safari
-        e.preventDefault();
-
         touchId = e.touches[0].identifier;
         touchY = e.touches[0].clientY;
 
@@ -238,33 +235,18 @@ export function setup() {
     }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 
     window.addEventListener('touchmove', e => {
-        // this disables two-finger zooming on safari
-        e.preventDefault();
-
         const touch = [... e.touches].find(t => t.identifier === touchId);
         if (!touch) {
             return;
         }
 
         const deltaY = touch.clientY - touchY;
-        if (Date.now() - lastT < 50 || Math.abs(deltaY) < 10) {
-            return;
-        }
-
-        lastT = Date.now();
         touchY = touch.clientY;
 
-        if (handleScroll(ui, deltaY, deltaY)) {
-            return;
-        }
-
-        gridSize = clamp(gridSize + (deltaY > 0 ? 16 : -16), 16, 128);
+        handleScroll(ui, deltaY, deltaY);
     }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 
     window.addEventListener('touchend', e => {
-        // this disables two-finger zooming on safari
-        e.preventDefault();
-
         touchId = undefined;
     }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 
