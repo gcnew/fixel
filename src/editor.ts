@@ -87,6 +87,7 @@ const styles = compileStyle<UiStyle>(styleContext, `
         y: toolOffset + 10;
         w: (width < 600) ? 124 : 199;
         h: height - toolOffset - 10 - 1;
+        gap: 5;
     }
 
     #atlas-list-container {
@@ -134,6 +135,7 @@ type LayoutData = {
     font?: string,
     borderW?: number,
     borderColor?: string,
+    gap?: number,
 
     scroll?: 'x' | 'y',
     scrollX?: number,
@@ -150,6 +152,7 @@ type UiStyle = {
     font?: string,
     borderW?: number,
     borderColor?: string,
+    gap?: number,
 
     scroll?: 'x' | 'y',
 }
@@ -395,19 +398,22 @@ function drawAutoContainer(o: AutoContainer<unknown>) {
         ctx.strokeRect(ld.x!, ld.y!, ld.w!, ld.h!);    // TODO: [styles]
     }
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(ld.x!, ld.y!, ld.w!, ld.h!);    // TODO: [styles]
-    ctx.clip();
+    if (ld.scroll) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(ld.x! - 1, ld.y! - 1, ld.w! + 1, ld.h! + 1);    // TODO: [styles]
+        ctx.clip();
+    }
 
+    const gap = ld.gap ?? 0;
     let dy = 0;
     let dx = 0;
 
     const totalHeight = o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h!, 0);
     const totalWidth = o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w!, 0);
 
-    ld.scrollX = clamp(ld.scrollX ?? 0, ld.w! - totalWidth, 0);
-    ld.scrollY = clamp(ld.scrollY ?? 0, ld.h! - totalHeight, 0);
+    ld.scrollX = clamp(ld.scrollX ?? 0, Math.min(ld.w!, totalWidth) - totalWidth, 0);
+    ld.scrollY = clamp(ld.scrollY ?? 0, Math.min(ld.h!, totalHeight) - totalHeight, 0);
 
     for (const c of o.children) {
         const childLd = getOrCreateLayout(c);
@@ -416,14 +422,16 @@ function drawAutoContainer(o: AutoContainer<unknown>) {
         childLd.y = ld.y! + dy + ld.scrollY;  // TODO: [styles]
 
         if (o.mode === 'column') {
-            dy += childLd.h!;    // TODO: [styles]
+            dy += childLd.h! + gap;    // TODO: [styles]
         } else {
-            dx += childLd.w!;    // TODO: [styles]
+            dx += childLd.w! + gap;    // TODO: [styles]
         }
     }
 
     drawUI(o.children);
-    ctx.restore();
+    if (ld.scroll) {
+        ctx.restore();
+    }
 }
 
 function getOrCreateLayout(o: Button<unknown> | AutoContainer<unknown>): LayoutData {
