@@ -78,12 +78,35 @@ const styleContext = {
 
     get toolSize() {
         return toolSize;
+    },
+
+    get toolOffset() {
+        return toolOffset;
     }
 };
 
 const styles = `
 
-    toolOffset = height - (toolSize + 5) * 4 - 5 - 5;
+    #tiles-container {
+        x: 5;
+        y: toolOffset + 10;
+        w: (width < 600) ? width - 140 : width - 215;
+        h: height - toolOffset - 10;
+        gap: 5;
+
+        scroll: 'x';
+    }
+
+    .tile {
+        w: toolSize;
+        h: toolSize;
+    }
+
+    .tile-active {
+        ... .tile;
+        borderColor: '#cc0909';
+        borderW: 2;
+    }
 
     #tools-container {
         x: (width < 600) ? width - 125 : width - 200;
@@ -129,7 +152,7 @@ export function setup() {
     registerShortcuts(KbShortcuts);
 
     listen('mouseup', onClickHandler);
-    listen('resize', regenerateUI);
+    listen('resize', onResize);
 
     addStylesUI(styleContext, styles);
 
@@ -137,6 +160,7 @@ export function setup() {
     addTouchListeners();
 
     loadAtlases();
+    onResize();
 }
 
 export function tearDown() {
@@ -231,19 +255,21 @@ function onClickHandler() {
     }
 }
 
+function onResize() {
+    ctx.imageSmoothingEnabled = false;
+
+    toolSize = (width < 600) ? 32 : 64;
+    toolOffset = height - (toolSize + 5) * 4 - 5 - 5;
+}
+
 function regenerateUI() {
     if (loading) {
         return;
     }
 
-    toolSize = (width < 600) ? 32 : 64;
-
-    ctx.imageSmoothingEnabled = false;
-    toolOffset = height - (toolSize + 5) * 4 - 5 - 5;
-
     ui = [
         createToolsContainer(),
-        ... createAtlasTiles(),
+        createAtlasTiles(4),
     ];
 }
 
@@ -313,40 +339,36 @@ function createAtlasList(): AutoContainer<undefined> {
 function onAtlasButtonClick(x: Button<undefined>) {
     curAtlas = x.id;
     currentTile = undefined;
+
     regenerateUI();
 }
 
-function createAtlasTiles(): Button<{x: number, y: number}>[] {
+function createAtlasTiles(nRows: number): AutoContainer<{ x: number, y: number }> {
 
     const atlas = loadedAtlases[curAtlas]!;
 
-    const aw = atlas.width / sliceSize;
-    const ah = atlas.height / sliceSize;
-    const maxTiles = Math.floor((width - 205) / (toolSize + 5)) * 4;
-    const count = Math.min(ah * aw, maxTiles);
+    const ac = atlas.width / sliceSize;
+    const ar = atlas.height / sliceSize;
+    const count = ar * ac;
 
-    const acc = [];
+    const cols = [];
+    let rows = [];
+    let currRow = [];
+
     for (let i = 0; i < count; ++i) {
-        const ax = i % aw;
-        const ay = i / aw | 0;
-
-        const tx = Math.floor(ay / 4) * aw + ax;
-        const ty = ay % 4;
-
+        const ax = i % ac;
+        const ay = i / ac | 0;
         const data = { x: ax, y: ay };
 
         const btn: Button<{x: number, y: number}> = {
             kind: 'button',
             id: 'btn:' + ax + ':' + ay,
             data,
-            style: {
-                x: 5 + tx * (toolSize + 5),
-                y: toolOffset + 10 + ty * (toolSize + 5),
-                w: toolSize,
-                h: toolSize,
-                borderColor: '#cc0909',
-                get borderW() { return currentTile === data ? 2 : 0 },
+
+            get style() {
+                return currentTile === data ? '.tile-active' : '.tile';
             },
+
             inner: {
                 kind: 'image',
                 src: curAtlas,
@@ -358,13 +380,46 @@ function createAtlasTiles(): Button<{x: number, y: number}>[] {
             onClick: onAtlasTileClick
         };
 
-        acc.push(btn);
+        currRow.push(btn);
+        if (i % ac === ac - 1) {
+            const container: AutoContainer<{ x: number, y: number }> = {
+                kind: 'auto-container',
+                id: `tiles-row:${cols.length}:${rows.length}`,
+                mode: 'row',
+                children: currRow,
+                style: { gap: 5 },
+            };
+
+            rows.push(container);
+            currRow = [];
+        }
+
+        if (rows.length === nRows || i === count - 1) {
+            const container: AutoContainer<{ x: number, y: number }> = {
+                kind: 'auto-container',
+                id: `tiles-col:${cols.length}`,
+                mode: 'column',
+                children: rows,
+                style: { gap: 5 },
+            };
+
+            cols.push(container);
+            rows = [];
+        }
     }
 
-    return acc;
+    const container: AutoContainer<{ x: number, y: number }> = {
+        kind: 'auto-container',
+        id: 'tiles-container',
+        mode: 'row',
+        children: cols,
+        style: '#tiles-container',
+    };
+
+    return container;
 }
 
-function onAtlasTileClick(x: ReturnType<typeof createAtlasTiles>[0]) {
+function onAtlasTileClick(x: Button<NonNullable<typeof currentTile>>) {
     currentTile = currentTile === x.data
         ? undefined
         : x.data;
