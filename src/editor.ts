@@ -88,14 +88,11 @@ const styles = `
     #tools-container {
         x: (width < 600) ? width - 125 : width - 200;
         y: toolOffset + 10;
-        w: (width < 600) ? 124 : 199;
-        h: height - toolOffset - 10 - 1;
         gap: 5;
     }
 
     #atlas-list-container {
-        w: (width < 600) ? 90 : 150;
-        h: height - toolOffset - 10 - ((width < 600) ? 4 : 3);
+        maxHeight: height - toolOffset - 10 - ((width < 600) ? 4 : 3);
 
         borderW: 1;
         borderColor: 'darkgray';
@@ -126,7 +123,6 @@ const styles = `
         color: 'floralwhite';
     }
 `;
-
 
 export function setup() {
 

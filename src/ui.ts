@@ -54,13 +54,17 @@ export type UIStyle = {
 
     w?: number,
     h?: number,
+
+    maxWidth?: number | undefined,
+    maxHeight?: number | undefined,
+
     color?: string,
     font?: string,
     borderW?: number | string,
     borderColor?: string,
 
     gap?: number,
-    scroll: 'x' | 'y' | undefined,
+    scroll?: 'x' | 'y' | undefined,
 }
 
 type LayoutData = {
@@ -72,11 +76,14 @@ type LayoutData = {
     w: number,
     h: number,
 
-    scroll?: 'x' | 'y' | undefined,
+    scroll: 'x' | 'y' | undefined,
     scrollX: number,
     scrollY: number,
 
     // Accessors
+    maxWidth: number | undefined,
+    maxHeight: number | undefined,
+
     color: string,
     font: string,
     borderW: number | string,
@@ -97,6 +104,8 @@ const defaultStyle: Required<UIStyle> = {
     y: 0,
     w: 0,
     h: 0,
+    maxWidth: undefined,
+    maxHeight: undefined,
     color: 'aqua',
     font: '12px monospace',
     borderW: 0,
@@ -247,16 +256,33 @@ function drawOldButton(o: OldButton<unknown>) {
 function drawAutoContainer(o: AutoContainer<unknown>) {
     const ld = getOrCreateLayout(o);
 
-    if (displayBoundingBoxes) {
-        ctx.strokeStyle = 'red';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(ld.x - 1, ld.y -1, ld.w + 1, ld.h + 1);
+    const totalHeight = o.mode === 'row'
+        ? o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).h), 0)
+        : o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h + ld.gap, -ld.gap);
+    const totalWidth = o.mode === 'row'
+        ? o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w + ld.gap, -ld.gap)
+        : o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).w), 0);
+
+    if (!ld.style.h) {
+        ld.h = totalHeight;
     }
 
-    if (ld.scroll) {
-        const totalHeight = o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h, 0);
-        const totalWidth = o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w, 0);
+    if (!ld.style.w) {
+        ld.w = totalWidth;
+    }
 
+    const maxHeight = ld.style?.maxHeight;
+    if (maxHeight) {
+        ld.h = Math.min(maxHeight, totalHeight);
+    }
+
+    const maxWidth = ld.style?.maxWidth;
+    if (maxWidth) {
+        ld.w = Math.min(maxWidth, totalWidth);
+    }
+
+    const clip = !!ld.scroll || totalHeight > ld.h || totalWidth > ld.w;
+    if (clip) {
         ld.scrollX = clamp(ld.scrollX, Math.min(ld.w, totalWidth) - totalWidth, 0);
         ld.scrollY = clamp(ld.scrollY, Math.min(ld.h, totalHeight) - totalHeight, 0);
 
@@ -283,10 +309,16 @@ function drawAutoContainer(o: AutoContainer<unknown>) {
     }
 
     drawUI(o.children);
-    if (ld.scroll) {
+    if (clip) {
         ctx.restore();
     }
     drawBorder(ld);
+
+    if (displayBoundingBoxes) {
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(ld.x - 1, ld.y -1, ld.w + 1, ld.h + 1);
+    }
 }
 
 function getOrCreateLayout(o: Button<unknown> | AutoContainer<unknown>): LayoutData {
@@ -331,11 +363,13 @@ function createLayoutData(style: UIStyle | undefined): LayoutData {
         scrollY: 0,
 
         // Accessors
-        get color() { return style?.color || defaultStyle.color; },
-        get font() { return style?.font || defaultStyle.font; },
-        get borderW() { return style?.borderW || defaultStyle.borderW; },
+        get maxWidth()    { return style?.maxWidth    || defaultStyle.maxWidth;    },
+        get maxHeight()   { return style?.maxHeight   || defaultStyle.maxHeight;   },
+        get color()       { return style?.color       || defaultStyle.color;       },
+        get font()        { return style?.font        || defaultStyle.font;        },
+        get borderW()     { return style?.borderW     || defaultStyle.borderW;     },
         get borderColor() { return style?.borderColor || defaultStyle.borderColor; },
-        get gap() { return style?.gap || defaultStyle.gap; },
+        get gap()         { return style?.gap         || defaultStyle.gap;         },
     };
 
     return res;
