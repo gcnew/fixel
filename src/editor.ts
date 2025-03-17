@@ -11,7 +11,7 @@ import * as ENG from './engine'
 import { clamp } from './util'
 import type { Shortcut } from './keyboard'
 import {
-    UI, Button, AutoContainer, OldButton,
+    UI, Button, AutoContainer,
 
     drawUI, handleScrollUI, handleClickUI, addStylesUI, addAtlasesUI, displayBoundingBoxes
 } from './ui'
@@ -316,7 +316,7 @@ function onAtlasButtonClick(x: Button<undefined>) {
     regenerateUI();
 }
 
-function createAtlasTiles(): OldButton<{x: number, y: number}>[] {
+function createAtlasTiles(): Button<{x: number, y: number}>[] {
 
     const atlas = loadedAtlases[curAtlas]!;
 
@@ -333,16 +333,20 @@ function createAtlasTiles(): OldButton<{x: number, y: number}>[] {
         const tx = Math.floor(ay / 4) * aw + ax;
         const ty = ay % 4;
 
-        const btn: OldButton<{x: number, y: number}> = {
-            kind: 'old-button',
+        const data = { x: ax, y: ay };
+
+        const btn: Button<{x: number, y: number}> = {
+            kind: 'button',
             id: 'btn:' + ax + ':' + ay,
-            data: { x: ax, y: ay },
-            x: 5 + tx * (toolSize + 5),
-            y: toolOffset + 10 + ty * (toolSize + 5),
-            w: toolSize,
-            h: toolSize,
-            color: '#cc0909',
-            get borderW() { return currentTile === this.data ? 2 : 0 },
+            data,
+            style: {
+                x: 5 + tx * (toolSize + 5),
+                y: toolOffset + 10 + ty * (toolSize + 5),
+                w: toolSize,
+                h: toolSize,
+                borderColor: '#cc0909',
+                get borderW() { return currentTile === data ? 2 : 0 },
+            },
             inner: {
                 kind: 'image',
                 src: curAtlas,

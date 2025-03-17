@@ -11,18 +11,16 @@ import { clamp } from './util'
 
 export type UI<T> = Button<T>
                   | AutoContainer<T>
-                  | OldButton<T>
 
 export type ImageSlice = { kind: 'image', src: string, dx: number, dy: number, w: number, h: number }
-export type TextProps  = { kind: 'text', text: string, font: string, color: string }
+export type TextProps  = { kind: 'text', text: string }
 
 export type Button<T> = {
     kind: 'button',
     id: string,
     data: T,
-    style: string | undefined,
-    inner: ImageSlice
-        | { kind: 'text', text: string, font?: string, color?: string },
+    style: string | UIStyle | undefined,
+    inner: ImageSlice | TextProps,
     onClick: (o: Button<T>) => void,
 }
 
@@ -31,21 +29,7 @@ export type AutoContainer<T> = {
     id: string,
     mode: 'column' | 'row',
     children: Exclude<UI<T>, { kind: 'old-button' }>[],
-    style: string | undefined,
-}
-
-export type OldButton<T> = {
-    kind: 'old-button',
-    id: string,
-    data: T,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    color: string,
-    borderW: number,
-    inner: ImageSlice | TextProps,
-    onClick: (o: OldButton<T>) => void,
+    style: string | UIStyle | undefined,
 }
 
 export type UIStyle = {
@@ -115,7 +99,7 @@ const defaultStyle: Required<UIStyle> = {
 };
 
 const styles: ReturnType<typeof compileStyle<UIStyle>> = {};
-const layoutDataCache: { [id: string]: LayoutData } = {};
+const layoutDataCache: { [id: string]: { style: UI<unknown>['style'], layout: LayoutData } } = {};
 const loadedAtlases: { [k: string]: HTMLImageElement } = {};
 
 let displayBoundingBoxes = false;
@@ -142,7 +126,6 @@ export function drawUI(ui: UI<unknown>[]) {
     for (const o of ui) {
         switch (o.kind) {
             case 'button': drawButton(o); break;
-            case 'old-button': drawOldButton(o); break;
             case 'auto-container': drawAutoContainer(o);
         }
     }
@@ -227,32 +210,6 @@ function drawLine(x: number, y: number, w: number, h: number, strokeStyle: strin
     ctx.stroke();
 }
 
-function drawOldButton(o: OldButton<unknown>) {
-    if (o.inner.kind === 'text') {
-        ctx.fillStyle = o.inner.color;
-        ctx.font = o.inner.font;
-
-        const dims = ctx.measureText(o.inner.text);
-        const ch = Math.round((o.h - dims.actualBoundingBoxAscent) / 2);
-        ctx.fillText(o.inner.text, o.x + o.w - dims.width - 4 | 0, o.y + dims.actualBoundingBoxAscent + ch | 0);
-    }
-
-    if (o.inner.kind === 'image') {
-        const atlas = loadedAtlases[o.inner.src];
-
-        if (atlas) {
-            ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, o.x, o.y, o.w, o.h);
-        }
-    }
-
-    if (o.borderW) {
-        ctx.strokeStyle = o.color;
-        ctx.lineWidth = o.borderW;
-
-        ctx.strokeRect(o.x, o.y, o.w, o.h);
-    }
-}
-
 function drawAutoContainer(o: AutoContainer<unknown>) {
     const ld = getOrCreateLayout(o);
 
@@ -322,18 +279,18 @@ function drawAutoContainer(o: AutoContainer<unknown>) {
 }
 
 function getOrCreateLayout(o: Button<unknown> | AutoContainer<unknown>): LayoutData {
-    const key = o.id + o.style;
-    const existing = layoutDataCache[key];
-    if (existing) {
-        return existing;
+    const existing = layoutDataCache[o.id];
+    if (existing && existing.style === o.style) {
+        return existing.layout;
     }
 
-    const style = o.style
+    const style = typeof o.style === 'string'
         ? styles[o.style]
-        : undefined;
+        : o.style;
 
     const ld = createLayoutData(style);
-    layoutDataCache[key] = ld;
+    layoutDataCache[o.id] = { style: o.style, layout: ld };
+
     return ld;
 }
 
@@ -398,15 +355,6 @@ export function handleClickUI(ui: UI<unknown>[]): boolean {
 
                 break;
             }
-
-            case 'old-button': {
-                if (mouseX >= o.x && mouseX <= o.x + o.w
-                    && mouseY >= o.y && mouseY <= o.y + o.h) {
-
-                    o.onClick(o);
-                    return true;
-                }
-            }
         }
     }
 
@@ -417,7 +365,6 @@ export function handleScrollUI(ui: UI<unknown>[], deltaX: number, deltaY: number
     for (const o of ui) {
         switch (o.kind) {
             case 'button':
-            case 'old-button':
                 break;
 
             case 'auto-container': {
