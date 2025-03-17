@@ -134,7 +134,7 @@ export function registerShortcuts(shortcuts: Shortcut[]) {
 }
 
 export function removeShortcuts(shortcuts: Shortcut[]) {
-    for (const [fn, sc] of shortcuts) {
+    for (const [_, sc] of shortcuts) {
         const fixed = normaliseShortcut(sc);
         KbShortcuts.delete(fixed);
     }
@@ -262,7 +262,7 @@ function drawDebug() {
         .filter(isTruthy);
 
     for (let i = 0; i < msg.length; ++i) {
-        ctx.fillText(msg[i], width - 130, (i + 1) * 10);
+        ctx.fillText(msg[i]!, width - 130, (i + 1) * 10);
     }
 }
 

@@ -1,7 +1,7 @@
 
 import {
     ctx,
-    mouseX, mouseY, pressedKeys
+    mouseX, mouseY
 } from './engine'
 
 import { compileStyle } from './mini-css'
@@ -72,7 +72,7 @@ type LayoutData = {
     w: number,
     h: number,
 
-    scroll?: 'x' | 'y',
+    scroll?: 'x' | 'y' | undefined,
     scrollX: number,
     scrollY: number,
 
@@ -156,7 +156,9 @@ function drawButton(o: Button<unknown>) {
     if (o.inner.kind === 'image') {
         const atlas = loadedAtlases[o.inner.src];
 
-        ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, ld.x, ld.y, ld.w, ld.h);
+        if (atlas) {
+            ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, ld.x, ld.y, ld.w, ld.h);
+        }
     }
 
     drawBorder(ld);
@@ -191,13 +193,13 @@ function drawBorder(ld: LayoutData) {
 
             // top|bottom, left|right -> top,right,bottom,left
             if (parsed.length === 2) {
-                parsed = [parsed[0], parsed[1], parsed[0], parsed[1]];
+                parsed = [parsed[0]!, parsed[1]!, parsed[0]!, parsed[1]!];
             }
 
-            drawLine(ld.x, ld.y, ld.w, 0, strokeStyle, parsed[0]);
-            drawLine(ld.x + ld.w, ld.y, 0, ld.h, strokeStyle, parsed[1]);
-            drawLine(ld.x, ld.y + ld.h, ld.w, 0, strokeStyle, parsed[2]);
-            drawLine(ld.x, ld.y, 0, ld.h, strokeStyle, parsed[3]);
+            drawLine(ld.x, ld.y, ld.w, 0, strokeStyle, parsed[0]!);
+            drawLine(ld.x + ld.w, ld.y, 0, ld.h, strokeStyle, parsed[1]!);
+            drawLine(ld.x, ld.y + ld.h, ld.w, 0, strokeStyle, parsed[2]!);
+            drawLine(ld.x, ld.y, 0, ld.h, strokeStyle, parsed[3]!);
             return;
         }
     }
@@ -229,7 +231,9 @@ function drawOldButton(o: OldButton<unknown>) {
     if (o.inner.kind === 'image') {
         const atlas = loadedAtlases[o.inner.src];
 
-        ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, o.x, o.y, o.w, o.h);
+        if (atlas) {
+            ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, o.x, o.y, o.w, o.h);
+        }
     }
 
     if (o.borderW) {

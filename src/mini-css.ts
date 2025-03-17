@@ -55,7 +55,7 @@ function compileVar(def: string): Accessor | undefined {
         return undefined;
     }
 
-    const func = compileExpr(expr);
+    const func = compileExpr(expr!);
     if (!func) {
         return undefined;
     }
@@ -72,7 +72,7 @@ function compileRule(def: string): CompiledRule | undefined {
     const exts: string[] = [];
     const props: Accessor[] = [];
 
-    const left = body
+    const left = body!
         .trim()
         .replaceAll(/\.\.\. *([#.]?[a-z-_]+);/gi, (_, name) => {
             exts.push(name);

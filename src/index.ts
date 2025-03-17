@@ -2,7 +2,7 @@
 import * as Game from './editor'
 
 import { Shortcut } from './keyboard'
-import { setup, setGameObject, registerShortcuts, toggleRun, toggleDebug, isMac } from './engine'
+import { setup, setGameObject, registerShortcuts, toggleDebug } from './engine'
 
 let KbShortcuts: Shortcut[] = [
     [toggleDebug,  'D'],

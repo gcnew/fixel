@@ -1,8 +1,8 @@
 
 import {
-    canvas, ctx,
+    ctx,
 
-    width, height, clickX, clickY, mouseX, mouseY, pressedKeys
+    width, height, pressedKeys
 } from './engine'
 
 

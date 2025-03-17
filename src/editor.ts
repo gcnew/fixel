@@ -2,8 +2,8 @@
 import {
     canvas, ctx,
 
-    width, height, mouseX, mouseY, pressedKeys, debug,
-    listen, unlisten, registerShortcuts, removeShortcuts, addDebugMsg
+    width, height, mouseX, mouseY,
+    listen, unlisten, registerShortcuts, removeShortcuts,
 } from './engine'
 
 import * as ENG from './engine'
@@ -11,7 +11,7 @@ import * as ENG from './engine'
 import { clamp } from './util'
 import type { Shortcut } from './keyboard'
 import {
-    UI, UIStyle, Button, AutoContainer, OldButton,
+    UI, Button, AutoContainer, OldButton,
 
     drawUI, handleScrollUI, handleClickUI, addStylesUI, addAtlasesUI, displayBoundingBoxes
 } from './ui'
@@ -149,7 +149,7 @@ export function tearDown() {
     removeShortcuts(KbShortcuts);
 }
 
-export function draw(dt: number) {
+export function draw() {
     if (loading) {
         drawLoading();
         return;
@@ -194,7 +194,7 @@ function drawGrid() {
 
 function drawObjects() {
     for (const o of objects) {
-        const atlas = loadedAtlases[o.atlas];
+        const atlas = loadedAtlases[o.atlas]!;
 
         ctx.drawImage(atlas, o.tileX * sliceSize, o.tileY * sliceSize, sliceSize, sliceSize, o.x, o.y, gridSize, gridSize);
     }
@@ -211,7 +211,7 @@ function drawCursor() {
 
     const x = Math.floor(mouseX / gridSize) * gridSize;
     const y = Math.floor(mouseY / gridSize) * gridSize;
-    const atlas = loadedAtlases[curAtlas];
+    const atlas = loadedAtlases[curAtlas]!;
 
     ctx.drawImage(atlas, currentTile.x * sliceSize, currentTile.y * sliceSize , sliceSize, sliceSize, x, y, gridSize, gridSize);
 }
@@ -285,7 +285,7 @@ const zoomButton: Button<undefined> = {
 };
 
 function createAtlasList(): AutoContainer<undefined> {
-    const list = atlasPaths.map<Button<undefined>>((path, i) => {
+    const list = atlasPaths.map<Button<undefined>>(path => {
         const text = path
             .replace('img/', '')
             .replace('.png', '');
@@ -323,7 +323,7 @@ function onAtlasButtonClick(x: Button<undefined>) {
 
 function createAtlasTiles(): OldButton<{x: number, y: number}>[] {
 
-    const atlas = loadedAtlases[curAtlas];
+    const atlas = loadedAtlases[curAtlas]!;
 
     const aw = atlas.width / sliceSize;
     const ah = atlas.height / sliceSize;
@@ -397,13 +397,13 @@ function addTouchListeners() {
 
     window.addEventListener('touchstart', e => {
         // this disables two-finger zooming on safari
-        touchId = e.touches[0].identifier;
-        touchY = e.touches[0].clientY;
+        touchId = e.touches[0]!.identifier;
+        touchY = e.touches[0]!.clientY;
 
         // BIG HACK
         const ref = ENG;
-        ref.mouseX = e.touches[0].clientX;
-        ref.mouseY = e.touches[0].clientY;
+        ref.mouseX = e.touches[0]!.clientX;
+        ref.mouseY = e.touches[0]!.clientY;
     }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 
     window.addEventListener('touchmove', e => {
@@ -418,7 +418,7 @@ function addTouchListeners() {
         handleScrollUI(ui, deltaY, deltaY);
     }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 
-    window.addEventListener('touchend', e => {
+    window.addEventListener('touchend', () => {
         touchId = undefined;
     }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 }
