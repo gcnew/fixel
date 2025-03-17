@@ -372,7 +372,7 @@ export function handleScrollUI(ui: UI<unknown>[], deltaX: number, deltaY: number
 
                 if (!(mouseX >= ld.x && mouseX <= ld.x + ld.w
                     && mouseY >= ld.y && mouseY <= ld.y + ld.h)) {
-                    return false;
+                    break;
                 }
 
                 // first try children
@@ -381,7 +381,7 @@ export function handleScrollUI(ui: UI<unknown>[], deltaX: number, deltaY: number
                 }
 
                 if (!ld.scroll) {
-                    return false;
+                    break;
                 }
 
                 if (ld.scroll === 'x') {
