@@ -447,11 +447,13 @@ function loadAtlases() {
 
 function addTouchListeners() {
     let touchY: number;
+    let touchX: number;
     let touchId: number | undefined;
 
     window.addEventListener('touchstart', e => {
         // this disables two-finger zooming on safari
         touchId = e.touches[0]!.identifier;
+        touchX = e.touches[0]!.clientX;
         touchY = e.touches[0]!.clientY;
 
         // BIG HACK
@@ -466,10 +468,13 @@ function addTouchListeners() {
             return;
         }
 
+        const deltaX = touch.clientX - touchX;
         const deltaY = touch.clientY - touchY;
+
+        touchX = touch.clientX;
         touchY = touch.clientY;
 
-        handleScrollUI(ui, deltaY, deltaY);
+        handleScrollUI(ui, deltaX, deltaY);
     }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 
     window.addEventListener('touchend', () => {
