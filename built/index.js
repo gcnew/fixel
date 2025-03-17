@@ -469,13 +469,280 @@ define("mini-css", ["require", "exports"], function (require, exports) {
         return { name: x.name, extends: x.extends, props: finalProps };
     }
 });
-define("editor", ["require", "exports", "engine", "engine", "mini-css", "util"], function (require, exports, engine_1, ENG, mini_css_1, util_2) {
+define("ui", ["require", "exports", "engine", "mini-css", "util"], function (require, exports, engine_1, mini_css_1, util_2) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.handleScrollUI = exports.handleClickUI = exports.drawUI = exports.addAtlasesUI = exports.addStylesUI = exports.displayBoundingBoxes = void 0;
+    const defaultStyle = {
+        x: 0,
+        y: 0,
+        w: 0,
+        h: 0,
+        color: 'aqua',
+        font: '12px monospace',
+        borderW: 0,
+        borderColor: 'aqua',
+        gap: 0,
+        scroll: undefined,
+    };
+    const styles = {};
+    const layoutDataCache = {};
+    const loadedAtlases = {};
+    let displayBoundingBoxes = false;
+    function accessDisplayBoundingBoxes(val) {
+        if (typeof val === 'boolean') {
+            displayBoundingBoxes = val;
+        }
+        return displayBoundingBoxes;
+    }
+    exports.displayBoundingBoxes = accessDisplayBoundingBoxes;
+    function addStylesUI(styleContext, stylesToAdd) {
+        const compiled = (0, mini_css_1.compileStyle)(styleContext, stylesToAdd);
+        Object.defineProperties(styles, Object.getOwnPropertyDescriptors(compiled));
+    }
+    exports.addStylesUI = addStylesUI;
+    function addAtlasesUI(atlases) {
+        Object.defineProperties(loadedAtlases, Object.getOwnPropertyDescriptors(atlases));
+    }
+    exports.addAtlasesUI = addAtlasesUI;
+    function drawUI(ui) {
+        for (const o of ui) {
+            switch (o.kind) {
+                case 'button':
+                    drawButton(o);
+                    break;
+                case 'old-button':
+                    drawOldButton(o);
+                    break;
+                case 'auto-container': drawAutoContainer(o);
+            }
+        }
+    }
+    exports.drawUI = drawUI;
+    function drawButton(o) {
+        const ld = getOrCreateLayout(o);
+        if (o.inner.kind === 'text') {
+            engine_1.ctx.fillStyle = ld.color;
+            engine_1.ctx.font = ld.font;
+            const dims = engine_1.ctx.measureText(o.inner.text);
+            const ch = Math.round((ld.h - dims.actualBoundingBoxAscent) / 2);
+            const wOffset = Math.max(ld.w - dims.width - 4 | 0, 5);
+            engine_1.ctx.fillText(o.inner.text, ld.x + wOffset, ld.y + dims.actualBoundingBoxAscent + ch | 0, ld.w - 9);
+        }
+        if (o.inner.kind === 'image') {
+            const atlas = loadedAtlases[o.inner.src];
+            engine_1.ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, ld.x, ld.y, ld.w, ld.h);
+        }
+        drawBorder(ld);
+    }
+    function drawBorder(ld) {
+        const borderW = ld.borderW;
+        if (!borderW) {
+            return;
+        }
+        switch (typeof borderW) {
+            case 'number': {
+                engine_1.ctx.strokeStyle = ld.borderColor;
+                engine_1.ctx.lineWidth = borderW;
+                engine_1.ctx.strokeRect(ld.x, ld.y, ld.w, ld.h);
+                return;
+            }
+            case 'string': {
+                let parsed = borderW.split(/\s+/g)
+                    .map(Number);
+                const strokeStyle = ld.borderColor;
+                if (parsed.length !== 2 && parsed.length !== 4) {
+                    console.warn(`Bad border style: ${borderW} ${JSON.stringify(parsed)}`);
+                    return;
+                }
+                // top|bottom, left|right -> top,right,bottom,left
+                if (parsed.length === 2) {
+                    parsed = [parsed[0], parsed[1], parsed[0], parsed[1]];
+                }
+                drawLine(ld.x, ld.y, ld.w, 0, strokeStyle, parsed[0]);
+                drawLine(ld.x + ld.w, ld.y, 0, ld.h, strokeStyle, parsed[1]);
+                drawLine(ld.x, ld.y + ld.h, ld.w, 0, strokeStyle, parsed[2]);
+                drawLine(ld.x, ld.y, 0, ld.h, strokeStyle, parsed[3]);
+                return;
+            }
+        }
+    }
+    function drawLine(x, y, w, h, strokeStyle, lineWidth) {
+        if (!lineWidth) {
+            return;
+        }
+        engine_1.ctx.strokeStyle = strokeStyle;
+        engine_1.ctx.lineWidth = lineWidth;
+        engine_1.ctx.beginPath();
+        engine_1.ctx.moveTo(x, y);
+        engine_1.ctx.lineTo(x + w, y + h);
+        engine_1.ctx.stroke();
+    }
+    function drawOldButton(o) {
+        if (o.inner.kind === 'text') {
+            engine_1.ctx.fillStyle = o.inner.color;
+            engine_1.ctx.font = o.inner.font;
+            const dims = engine_1.ctx.measureText(o.inner.text);
+            const ch = Math.round((o.h - dims.actualBoundingBoxAscent) / 2);
+            engine_1.ctx.fillText(o.inner.text, o.x + o.w - dims.width - 4 | 0, o.y + dims.actualBoundingBoxAscent + ch | 0);
+        }
+        if (o.inner.kind === 'image') {
+            const atlas = loadedAtlases[o.inner.src];
+            engine_1.ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, o.x, o.y, o.w, o.h);
+        }
+        if (o.borderW) {
+            engine_1.ctx.strokeStyle = o.color;
+            engine_1.ctx.lineWidth = o.borderW;
+            engine_1.ctx.strokeRect(o.x, o.y, o.w, o.h);
+        }
+    }
+    function drawAutoContainer(o) {
+        const ld = getOrCreateLayout(o);
+        if (displayBoundingBoxes) {
+            engine_1.ctx.strokeStyle = 'red';
+            engine_1.ctx.lineWidth = 1;
+            engine_1.ctx.strokeRect(ld.x - 1, ld.y - 1, ld.w + 1, ld.h + 1);
+        }
+        if (ld.scroll) {
+            const totalHeight = o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h, 0);
+            const totalWidth = o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w, 0);
+            ld.scrollX = (0, util_2.clamp)(ld.scrollX, Math.min(ld.w, totalWidth) - totalWidth, 0);
+            ld.scrollY = (0, util_2.clamp)(ld.scrollY, Math.min(ld.h, totalHeight) - totalHeight, 0);
+            engine_1.ctx.save();
+            engine_1.ctx.beginPath();
+            engine_1.ctx.rect(ld.x - 1, ld.y - 1, ld.w + 1, ld.h + 1);
+            engine_1.ctx.clip();
+        }
+        let dy = 0;
+        let dx = 0;
+        for (const c of o.children) {
+            const childLd = getOrCreateLayout(c);
+            childLd.x = ld.x + dx + ld.scrollX;
+            childLd.y = ld.y + dy + ld.scrollY;
+            if (o.mode === 'column') {
+                dy += childLd.h + ld.gap;
+            }
+            else {
+                dx += childLd.w + ld.gap;
+            }
+        }
+        drawUI(o.children);
+        if (ld.scroll) {
+            engine_1.ctx.restore();
+        }
+        drawBorder(ld);
+    }
+    function getOrCreateLayout(o) {
+        const key = o.id + o.style;
+        const existing = layoutDataCache[key];
+        if (existing) {
+            return existing;
+        }
+        const style = o.style
+            ? styles[o.style]
+            : undefined;
+        const ld = createLayoutData(style);
+        layoutDataCache[key] = ld;
+        return ld;
+    }
+    function createLayoutData(style) {
+        const res = {
+            $x: undefined,
+            $y: undefined,
+            $w: undefined,
+            $h: undefined,
+            style: style ?? defaultStyle,
+            get x() { return this.$x ?? this.style.x ?? defaultStyle.x; },
+            set x(val) { this.$x = val; },
+            get y() { return this.$y ?? this.style.y ?? defaultStyle.y; },
+            set y(val) { this.$y = val; },
+            get w() { return this.$w ?? this.style.w ?? defaultStyle.w; },
+            set w(val) { this.$w = val; },
+            get h() { return this.$h ?? this.style.h ?? defaultStyle.h; },
+            set h(val) { this.$h = val; },
+            scroll: style?.scroll,
+            scrollX: 0,
+            scrollY: 0,
+            // Accessors
+            get color() { return style?.color || defaultStyle.color; },
+            get font() { return style?.font || defaultStyle.font; },
+            get borderW() { return style?.borderW || defaultStyle.borderW; },
+            get borderColor() { return style?.borderColor || defaultStyle.borderColor; },
+            get gap() { return style?.gap || defaultStyle.gap; },
+        };
+        return res;
+    }
+    function handleClickUI(ui) {
+        for (const o of ui) {
+            switch (o.kind) {
+                case 'auto-container': {
+                    if (handleClickUI(o.children)) {
+                        return true;
+                    }
+                    break;
+                }
+                case 'button': {
+                    const ld = getOrCreateLayout(o);
+                    if (engine_1.mouseX >= ld.x && engine_1.mouseX <= ld.x + ld.w
+                        && engine_1.mouseY >= ld.y && engine_1.mouseY <= ld.y + ld.h) {
+                        o.onClick(o);
+                        return true;
+                    }
+                    break;
+                }
+                case 'old-button': {
+                    if (engine_1.mouseX >= o.x && engine_1.mouseX <= o.x + o.w
+                        && engine_1.mouseY >= o.y && engine_1.mouseY <= o.y + o.h) {
+                        o.onClick(o);
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    exports.handleClickUI = handleClickUI;
+    function handleScrollUI(ui, deltaX, deltaY) {
+        for (const o of ui) {
+            switch (o.kind) {
+                case 'button':
+                case 'old-button':
+                    break;
+                case 'auto-container': {
+                    const ld = getOrCreateLayout(o);
+                    if (!(engine_1.mouseX >= ld.x && engine_1.mouseX <= ld.x + ld.w
+                        && engine_1.mouseY >= ld.y && engine_1.mouseY <= ld.y + ld.h)) {
+                        return false;
+                    }
+                    // first try children
+                    if (handleScrollUI(o.children, deltaX, deltaY)) {
+                        return true;
+                    }
+                    if (!ld.scroll) {
+                        return false;
+                    }
+                    if (ld.scroll === 'x') {
+                        ld.scrollX = (ld.scrollX || 0) + deltaX;
+                    }
+                    else {
+                        ld.scrollY = (ld.scrollY || 0) + deltaY;
+                    }
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    exports.handleScrollUI = handleScrollUI;
+});
+define("editor", ["require", "exports", "engine", "engine", "util", "ui"], function (require, exports, engine_2, ENG, util_3, ui_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.draw = exports.tearDown = exports.setup = void 0;
     ENG = __importStar(ENG);
     const KbShortcuts = [
         [onEscape, 'ESC'],
+        [() => (0, ui_1.displayBoundingBoxes)(!(0, ui_1.displayBoundingBoxes)()), ']'],
     ];
     const atlasPaths = [
         'img/chest.png',
@@ -515,19 +782,18 @@ define("editor", ["require", "exports", "engine", "engine", "mini-css", "util"],
     let curAtlas = 'img/grass.png';
     let currentTile;
     let ui = [];
-    let layoutDataCache = {};
     const styleContext = {
         get height() {
-            return engine_1.height;
+            return engine_2.height;
         },
         get width() {
-            return engine_1.width;
+            return engine_2.width;
         },
         get toolSize() {
             return toolSize;
         }
     };
-    const styles = (0, mini_css_1.compileStyle)(styleContext, `
+    const styles = `
 
     toolOffset = height - (toolSize + 5) * 4 - 5 - 5;
 
@@ -541,8 +807,10 @@ define("editor", ["require", "exports", "engine", "engine", "mini-css", "util"],
 
     #atlas-list-container {
         w: (width < 600) ? 90 : 150;
-        h: height - toolOffset - 10 - 1;
+        h: height - toolOffset - 10 - ((width < 600) ? 4 : 3);
 
+        borderW: 1;
+        borderColor: 'darkgray';
         scroll: 'y';
     }
 
@@ -569,23 +837,24 @@ define("editor", ["require", "exports", "engine", "engine", "mini-css", "util"],
         ... .atlas-list-button;
         color: 'floralwhite';
     }
-`);
+`;
     function setup() {
-        (0, engine_1.registerShortcuts)(KbShortcuts);
-        (0, engine_1.listen)('mouseup', onClickHandler);
-        (0, engine_1.listen)('resize', regenerateUI);
-        engine_1.canvas.addEventListener('contextmenu', e => {
-            const x = Math.floor(engine_1.mouseX / gridSize) * gridSize;
-            const y = Math.floor(engine_1.mouseY / gridSize) * gridSize;
+        (0, engine_2.registerShortcuts)(KbShortcuts);
+        (0, engine_2.listen)('mouseup', onClickHandler);
+        (0, engine_2.listen)('resize', regenerateUI);
+        (0, ui_1.addStylesUI)(styleContext, styles);
+        engine_2.canvas.addEventListener('contextmenu', e => {
+            const x = Math.floor(engine_2.mouseX / gridSize) * gridSize;
+            const y = Math.floor(engine_2.mouseY / gridSize) * gridSize;
             objects = objects.filter(o => o.x !== x || o.y !== y);
             e.preventDefault();
             return false;
         });
-        engine_1.canvas.addEventListener('wheel', e => {
-            if (handleScroll(ui, e.deltaX, e.deltaY)) {
+        engine_2.canvas.addEventListener('wheel', e => {
+            if ((0, ui_1.handleScrollUI)(ui, e.deltaX, e.deltaY)) {
                 return;
             }
-            gridSize = (0, util_2.clamp)(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
+            gridSize = (0, util_3.clamp)(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
         });
         let touchY;
         let touchId;
@@ -605,7 +874,7 @@ define("editor", ["require", "exports", "engine", "engine", "mini-css", "util"],
             }
             const deltaY = touch.clientY - touchY;
             touchY = touch.clientY;
-            handleScroll(ui, deltaY, deltaY);
+            (0, ui_1.handleScrollUI)(ui, deltaY, deltaY);
         }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
         window.addEventListener('touchend', e => {
             touchId = undefined;
@@ -614,8 +883,8 @@ define("editor", ["require", "exports", "engine", "engine", "mini-css", "util"],
     }
     exports.setup = setup;
     function tearDown() {
-        (0, engine_1.unlisten)('mouseup', onClickHandler);
-        (0, engine_1.removeShortcuts)(KbShortcuts);
+        (0, engine_2.unlisten)('mouseup', onClickHandler);
+        (0, engine_2.removeShortcuts)(KbShortcuts);
     }
     exports.tearDown = tearDown;
     function loadAtlases() {
@@ -626,6 +895,7 @@ define("editor", ["require", "exports", "engine", "engine", "mini-css", "util"],
                 loadedAtlases[p] = img;
                 if (--leftToLoad === 0) {
                     loading = false;
+                    (0, ui_1.addAtlasesUI)(loadedAtlases);
                     regenerateUI();
                 }
             };
@@ -638,239 +908,73 @@ define("editor", ["require", "exports", "engine", "engine", "mini-css", "util"],
             return;
         }
         // clear the screen
-        engine_1.ctx.fillStyle = '#000';
-        engine_1.ctx.fillRect(0, 0, engine_1.width, engine_1.height);
-        drawUI(ui);
+        engine_2.ctx.fillStyle = '#000';
+        engine_2.ctx.fillRect(0, 0, engine_2.width, engine_2.height);
+        (0, ui_1.drawUI)(ui);
         drawGrid();
         drawObjects();
         drawCursor();
     }
     exports.draw = draw;
     function drawLoading() {
-        engine_1.ctx.clearRect(0, 0, engine_1.width, engine_1.height);
-        engine_1.ctx.fillStyle = '#34495E';
-        engine_1.ctx.font = '32px serif';
+        engine_2.ctx.clearRect(0, 0, engine_2.width, engine_2.height);
+        engine_2.ctx.fillStyle = '#34495E';
+        engine_2.ctx.font = '32px serif';
         const dots = (Date.now() % 1000) / 250 | 0;
-        const dims = engine_1.ctx.measureText(`Loading ...`);
-        engine_1.ctx.fillText(`Loading ${'.'.repeat(dots)}`, (engine_1.width - dims.width) / 2, (engine_1.height - dims.fontBoundingBoxAscent) / 2);
+        const dims = engine_2.ctx.measureText(`Loading ...`);
+        engine_2.ctx.fillText(`Loading ${'.'.repeat(dots)}`, (engine_2.width - dims.width) / 2, (engine_2.height - dims.fontBoundingBoxAscent) / 2);
     }
     function drawGrid() {
-        engine_1.ctx.fillStyle = 'darkgray';
-        for (let x = 0; x < engine_1.width; x += gridSize) {
-            engine_1.ctx.fillRect(x, 0, 1, toolOffset);
+        engine_2.ctx.fillStyle = 'darkgray';
+        for (let x = 0; x < engine_2.width; x += gridSize) {
+            engine_2.ctx.fillRect(x, 0, 1, toolOffset);
         }
         for (let y = 0; y < toolOffset; y += gridSize) {
-            engine_1.ctx.fillRect(0, y, engine_1.width, 1);
+            engine_2.ctx.fillRect(0, y, engine_2.width, 1);
         }
         // the last horizontal line (in case of off-tile height)
-        engine_1.ctx.fillRect(0, toolOffset, engine_1.width, 1);
-    }
-    function drawUI(ui) {
-        for (const o of ui) {
-            switch (o.kind) {
-                case 'button':
-                    drawButton(o);
-                    break;
-                case 'old-button':
-                    drawOldButton(o);
-                    break;
-                case 'auto-container': drawAutoContainer(o);
-            }
-        }
-    }
-    function drawButton(o) {
-        const ld = getOrCreateLayout(o);
-        if (o.inner.kind === 'text') {
-            engine_1.ctx.fillStyle = ld.color || 'aqua'; // TODO: [styles]
-            engine_1.ctx.font = ld.font || '12px monospace'; // TODO: [styles]
-            const dims = engine_1.ctx.measureText(o.inner.text);
-            const ch = Math.round((ld.h - dims.actualBoundingBoxAscent) / 2); // TODO: [styles]
-            const wOffset = Math.max(ld.w - dims.width - 4 | 0, 5);
-            engine_1.ctx.fillText(o.inner.text, ld.x + wOffset, ld.y + dims.actualBoundingBoxAscent + ch | 0, ld.w - 9); // TODO: [styles]
-        }
-        if (o.inner.kind === 'image') {
-            const atlas = loadedAtlases[o.inner.src];
-            engine_1.ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, ld.x, ld.y, ld.w, ld.h); // TODO: [styles]
-        }
-        if (ld.borderW) {
-            engine_1.ctx.strokeStyle = ld.borderColor || 'aqua'; // TODO: [styles]
-            engine_1.ctx.lineWidth = ld.borderW;
-            engine_1.ctx.strokeRect(ld.x, ld.y, ld.w, ld.h); // TODO: [styles]
-        }
-    }
-    function drawOldButton(o) {
-        if (o.inner.kind === 'text') {
-            engine_1.ctx.fillStyle = o.inner.color;
-            engine_1.ctx.font = o.inner.font;
-            const dims = engine_1.ctx.measureText(o.inner.text);
-            const ch = Math.round((o.h - dims.actualBoundingBoxAscent) / 2);
-            engine_1.ctx.fillText(o.inner.text, o.x + o.w - dims.width - 4 | 0, o.y + dims.actualBoundingBoxAscent + ch | 0);
-        }
-        if (o.inner.kind === 'image') {
-            const atlas = loadedAtlases[o.inner.src];
-            engine_1.ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, o.x, o.y, o.w, o.h);
-        }
-        if (o.borderW) {
-            engine_1.ctx.strokeStyle = o.color;
-            engine_1.ctx.lineWidth = o.borderW;
-            engine_1.ctx.strokeRect(o.x, o.y, o.w, o.h);
-        }
-    }
-    function drawAutoContainer(o) {
-        const ld = getOrCreateLayout(o);
-        if (engine_1.debug) {
-            engine_1.ctx.strokeStyle = 'red';
-            engine_1.ctx.lineWidth = 1;
-            engine_1.ctx.strokeRect(ld.x, ld.y, ld.w, ld.h); // TODO: [styles]
-        }
-        if (ld.scroll) {
-            engine_1.ctx.save();
-            engine_1.ctx.beginPath();
-            engine_1.ctx.rect(ld.x - 1, ld.y - 1, ld.w + 1, ld.h + 1); // TODO: [styles]
-            engine_1.ctx.clip();
-        }
-        const gap = ld.gap ?? 0;
-        let dy = 0;
-        let dx = 0;
-        const totalHeight = o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h, 0);
-        const totalWidth = o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w, 0);
-        ld.scrollX = (0, util_2.clamp)(ld.scrollX ?? 0, Math.min(ld.w, totalWidth) - totalWidth, 0);
-        ld.scrollY = (0, util_2.clamp)(ld.scrollY ?? 0, Math.min(ld.h, totalHeight) - totalHeight, 0);
-        for (const c of o.children) {
-            const childLd = getOrCreateLayout(c);
-            childLd.x = ld.x + dx + ld.scrollX; // TODO: [styles]
-            childLd.y = ld.y + dy + ld.scrollY; // TODO: [styles]
-            if (o.mode === 'column') {
-                dy += childLd.h + gap; // TODO: [styles]
-            }
-            else {
-                dx += childLd.w + gap; // TODO: [styles]
-            }
-        }
-        drawUI(o.children);
-        if (ld.scroll) {
-            engine_1.ctx.restore();
-        }
-    }
-    function getOrCreateLayout(o) {
-        const key = o.id + o.style;
-        const existing = layoutDataCache[key];
-        if (existing) {
-            return existing;
-        }
-        const style = o.style !== undefined
-            ? styles[o.style]
-            : undefined;
-        let ld = { x: 0, y: 0 };
-        if (style) {
-            ld = Object.create(style); // TODO: [styles]
-            //ld.x = ld.y = 0;             // TODO: [styles]
-        }
-        layoutDataCache[key] = ld;
-        return ld;
+        engine_2.ctx.fillRect(0, toolOffset, engine_2.width, 1);
     }
     function drawObjects() {
         for (const o of objects) {
             const atlas = loadedAtlases[o.atlas];
-            engine_1.ctx.drawImage(atlas, o.tileX * sliceSize, o.tileY * sliceSize, sliceSize, sliceSize, o.x, o.y, gridSize, gridSize);
+            engine_2.ctx.drawImage(atlas, o.tileX * sliceSize, o.tileY * sliceSize, sliceSize, sliceSize, o.x, o.y, gridSize, gridSize);
         }
     }
     function drawCursor() {
         if (!currentTile) {
             return;
         }
-        if (engine_1.mouseY > toolOffset) {
+        if (engine_2.mouseY > toolOffset) {
             return;
         }
-        const x = Math.floor(engine_1.mouseX / gridSize) * gridSize;
-        const y = Math.floor(engine_1.mouseY / gridSize) * gridSize;
+        const x = Math.floor(engine_2.mouseX / gridSize) * gridSize;
+        const y = Math.floor(engine_2.mouseY / gridSize) * gridSize;
         const atlas = loadedAtlases[curAtlas];
-        engine_1.ctx.drawImage(atlas, currentTile.x * sliceSize, currentTile.y * sliceSize, sliceSize, sliceSize, x, y, gridSize, gridSize);
+        engine_2.ctx.drawImage(atlas, currentTile.x * sliceSize, currentTile.y * sliceSize, sliceSize, sliceSize, x, y, gridSize, gridSize);
     }
     function onEscape() {
         currentTile = undefined;
     }
     function onClickHandler() {
-        handleClickUI(ui);
-        if (engine_1.mouseY <= toolOffset) {
+        (0, ui_1.handleClickUI)(ui);
+        if (engine_2.mouseY <= toolOffset) {
             if (!currentTile) {
                 return;
             }
-            const x = Math.floor(engine_1.mouseX / gridSize) * gridSize;
-            const y = Math.floor(engine_1.mouseY / gridSize) * gridSize;
+            const x = Math.floor(engine_2.mouseX / gridSize) * gridSize;
+            const y = Math.floor(engine_2.mouseY / gridSize) * gridSize;
             objects.push({ x, y, tileX: currentTile.x, tileY: currentTile.y, atlas: curAtlas });
             return;
         }
-    }
-    function handleClickUI(ui) {
-        for (const o of ui) {
-            switch (o.kind) {
-                case 'auto-container': {
-                    if (handleClickUI(o.children)) {
-                        return true;
-                    }
-                    break;
-                }
-                case 'button': {
-                    const ld = getOrCreateLayout(o);
-                    if (engine_1.mouseX >= ld.x && engine_1.mouseX <= ld.x + ld.w // TODO: [styles]
-                        && engine_1.mouseY >= ld.y && engine_1.mouseY <= ld.y + ld.h) { // TODO: [styles]
-                        o.onClick(o);
-                        return true;
-                    }
-                    break;
-                }
-                case 'old-button': {
-                    if (engine_1.mouseX >= o.x && engine_1.mouseX <= o.x + o.w
-                        && engine_1.mouseY >= o.y && engine_1.mouseY <= o.y + o.h) {
-                        o.onClick(o);
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
-    }
-    function onScrollHandler() {
-    }
-    function handleScroll(ui, deltaX, deltaY) {
-        for (const o of ui) {
-            switch (o.kind) {
-                case 'button':
-                case 'old-button':
-                    break;
-                case 'auto-container': {
-                    const ld = getOrCreateLayout(o);
-                    if (!(engine_1.mouseX >= ld.x && engine_1.mouseX <= ld.x + ld.w // TODO: [styles]
-                        && engine_1.mouseY >= ld.y && engine_1.mouseY <= ld.y + ld.h)) { // TODO: [styles]
-                        return false;
-                    }
-                    // first try children
-                    if (handleScroll(o.children, deltaX, deltaY)) {
-                        return true;
-                    }
-                    if (!ld.scroll) {
-                        return false;
-                    }
-                    if (ld.scroll === 'x') {
-                        ld.scrollX = (ld.scrollX || 0) + deltaX;
-                    }
-                    else {
-                        ld.scrollY = (ld.scrollY || 0) + deltaY;
-                    }
-                    return true;
-                }
-            }
-        }
-        return false;
     }
     function regenerateUI() {
         if (loading) {
             return;
         }
-        toolSize = (engine_1.width < 600) ? 32 : 64;
-        engine_1.ctx.imageSmoothingEnabled = false;
-        toolOffset = engine_1.height - (toolSize + 5) * 4 - 5 - 5;
+        toolSize = (engine_2.width < 600) ? 32 : 64;
+        engine_2.ctx.imageSmoothingEnabled = false;
+        toolOffset = engine_2.height - (toolSize + 5) * 4 - 5 - 5;
         ui = [
             createToolsContainer(),
             ...createAtlasTiles(),
@@ -938,7 +1042,7 @@ define("editor", ["require", "exports", "engine", "engine", "mini-css", "util"],
         const atlas = loadedAtlases[curAtlas];
         const aw = atlas.width / sliceSize;
         const ah = atlas.height / sliceSize;
-        const maxTiles = Math.floor((engine_1.width - 205) / (toolSize + 5)) * 4;
+        const maxTiles = Math.floor((engine_2.width - 205) / (toolSize + 5)) * 4;
         const count = Math.min(ah * aw, maxTiles);
         const acc = [];
         for (let i = 0; i < count; ++i) {
@@ -976,7 +1080,7 @@ define("editor", ["require", "exports", "engine", "engine", "mini-css", "util"],
             : x.data;
     }
 });
-define("game", ["require", "exports", "engine"], function (require, exports, engine_2) {
+define("game", ["require", "exports", "engine"], function (require, exports, engine_3) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.draw = exports.tearDown = exports.setup = void 0;
@@ -988,15 +1092,15 @@ define("game", ["require", "exports", "engine"], function (require, exports, eng
     let playerY;
     let playerSpeed = 200;
     function setup() {
-        playerX = engine_2.width / 2;
-        playerY = engine_2.height / 2;
+        playerX = engine_3.width / 2;
+        playerY = engine_3.height / 2;
     }
     exports.setup = setup;
     function tearDown() {
     }
     exports.tearDown = tearDown;
     function draw(dt) {
-        engine_2.ctx.clearRect(0, 0, engine_2.width, engine_2.height);
+        engine_3.ctx.clearRect(0, 0, engine_3.width, engine_3.height);
         if (loading) {
             drawLoading();
             return;
@@ -1007,44 +1111,44 @@ define("game", ["require", "exports", "engine"], function (require, exports, eng
     }
     exports.draw = draw;
     function tick(dt) {
-        const dx = engine_2.pressedKeys.RIGHT ? dt :
-            engine_2.pressedKeys.LEFT ? -dt : 0;
-        const dy = engine_2.pressedKeys.DOWN ? dt :
-            engine_2.pressedKeys.UP ? -dt : 0;
+        const dx = engine_3.pressedKeys.RIGHT ? dt :
+            engine_3.pressedKeys.LEFT ? -dt : 0;
+        const dy = engine_3.pressedKeys.DOWN ? dt :
+            engine_3.pressedKeys.UP ? -dt : 0;
         playerX += dx * playerSpeed / 1000;
         playerY += dy * playerSpeed / 1000;
     }
     function drawLoading() {
-        engine_2.ctx.fillStyle = '#34495E';
-        engine_2.ctx.font = '32px serif';
+        engine_3.ctx.fillStyle = '#34495E';
+        engine_3.ctx.font = '32px serif';
         const dots = (Date.now() % 1000) / 250 | 0;
-        const dims = engine_2.ctx.measureText(`Loading ...`);
-        engine_2.ctx.fillText(`Loading ${'.'.repeat(dots)}`, (engine_2.width - dims.width) / 2, (engine_2.height - dims.fontBoundingBoxAscent) / 2);
+        const dims = engine_3.ctx.measureText(`Loading ...`);
+        engine_3.ctx.fillText(`Loading ${'.'.repeat(dots)}`, (engine_3.width - dims.width) / 2, (engine_3.height - dims.fontBoundingBoxAscent) / 2);
     }
     function drawBackground() {
         const h = 192;
         const w = 192;
-        for (let i = 0; i < engine_2.height; i += h) {
-            for (let j = 0; j < engine_2.width; j += w) {
-                engine_2.ctx.drawImage(image, j, i, w, h);
+        for (let i = 0; i < engine_3.height; i += h) {
+            for (let j = 0; j < engine_3.width; j += w) {
+                engine_3.ctx.drawImage(image, j, i, w, h);
             }
         }
     }
     function drawPlayer() {
-        engine_2.ctx.fillStyle = '#FFF';
-        engine_2.ctx.fillRect(playerX - 20, playerY - 20, 20, 20);
+        engine_3.ctx.fillStyle = '#FFF';
+        engine_3.ctx.fillRect(playerX - 20, playerY - 20, 20, 20);
     }
 });
-define("index", ["require", "exports", "editor", "engine"], function (require, exports, Game, engine_3) {
+define("index", ["require", "exports", "editor", "engine"], function (require, exports, Game, engine_4) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     Game = __importStar(Game);
     let KbShortcuts = [
-        [engine_3.toggleDebug, 'D'],
+        [engine_4.toggleDebug, 'D'],
     ];
     window.onload = function () {
-        (0, engine_3.setup)();
-        (0, engine_3.registerShortcuts)(KbShortcuts);
-        (0, engine_3.setGameObject)(Game);
+        (0, engine_4.setup)();
+        (0, engine_4.registerShortcuts)(KbShortcuts);
+        (0, engine_4.setGameObject)(Game);
     };
 });
