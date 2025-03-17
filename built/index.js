@@ -231,7 +231,7 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
     }
     exports.registerShortcuts = registerShortcuts;
     function removeShortcuts(shortcuts) {
-        for (const [fn, sc] of shortcuts) {
+        for (const [_, sc] of shortcuts) {
             const fixed = (0, keyboard_1.normaliseShortcut)(sc);
             KbShortcuts.delete(fixed);
         }
@@ -478,6 +478,8 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         y: 0,
         w: 0,
         h: 0,
+        maxWidth: undefined,
+        maxHeight: undefined,
         color: 'aqua',
         font: '12px monospace',
         borderW: 0,
@@ -531,7 +533,9 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         }
         if (o.inner.kind === 'image') {
             const atlas = loadedAtlases[o.inner.src];
-            engine_1.ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, ld.x, ld.y, ld.w, ld.h);
+            if (atlas) {
+                engine_1.ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, ld.x, ld.y, ld.w, ld.h);
+            }
         }
         drawBorder(ld);
     }
@@ -588,7 +592,9 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         }
         if (o.inner.kind === 'image') {
             const atlas = loadedAtlases[o.inner.src];
-            engine_1.ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, o.x, o.y, o.w, o.h);
+            if (atlas) {
+                engine_1.ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, o.x, o.y, o.w, o.h);
+            }
         }
         if (o.borderW) {
             engine_1.ctx.strokeStyle = o.color;
@@ -598,19 +604,33 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
     }
     function drawAutoContainer(o) {
         const ld = getOrCreateLayout(o);
-        if (displayBoundingBoxes) {
-            engine_1.ctx.strokeStyle = 'red';
-            engine_1.ctx.lineWidth = 1;
-            engine_1.ctx.strokeRect(ld.x - 1, ld.y - 1, ld.w + 1, ld.h + 1);
+        const totalHeight = o.mode === 'row'
+            ? o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).h), 0)
+            : o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h + ld.gap, -ld.gap);
+        const totalWidth = o.mode === 'row'
+            ? o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w + ld.gap, -ld.gap)
+            : o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).w), 0);
+        if (!ld.style.h) {
+            ld.h = totalHeight;
         }
-        if (ld.scroll) {
-            const totalHeight = o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h, 0);
-            const totalWidth = o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w, 0);
+        if (!ld.style.w) {
+            ld.w = totalWidth;
+        }
+        const maxHeight = ld.style?.maxHeight;
+        if (maxHeight) {
+            ld.h = Math.min(maxHeight, totalHeight);
+        }
+        const maxWidth = ld.style?.maxWidth;
+        if (maxWidth) {
+            ld.w = Math.min(maxWidth, totalWidth);
+        }
+        const clip = !!ld.scroll || totalHeight > ld.h || totalWidth > ld.w;
+        if (clip) {
             ld.scrollX = (0, util_2.clamp)(ld.scrollX, Math.min(ld.w, totalWidth) - totalWidth, 0);
             ld.scrollY = (0, util_2.clamp)(ld.scrollY, Math.min(ld.h, totalHeight) - totalHeight, 0);
             engine_1.ctx.save();
             engine_1.ctx.beginPath();
-            engine_1.ctx.rect(ld.x - 1, ld.y - 1, ld.w + 1, ld.h + 1);
+            engine_1.ctx.rect(ld.x - 0.5, ld.y - 0.5, ld.w + 0.5, ld.h + 0.5);
             engine_1.ctx.clip();
         }
         let dy = 0;
@@ -627,10 +647,15 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             }
         }
         drawUI(o.children);
-        if (ld.scroll) {
+        if (clip) {
             engine_1.ctx.restore();
         }
         drawBorder(ld);
+        if (displayBoundingBoxes) {
+            engine_1.ctx.strokeStyle = 'red';
+            engine_1.ctx.lineWidth = 1;
+            engine_1.ctx.strokeRect(ld.x - 1, ld.y - 1, ld.w + 1, ld.h + 1);
+        }
     }
     function getOrCreateLayout(o) {
         const key = o.id + o.style;
@@ -664,6 +689,8 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             scrollX: 0,
             scrollY: 0,
             // Accessors
+            get maxWidth() { return style?.maxWidth || defaultStyle.maxWidth; },
+            get maxHeight() { return style?.maxHeight || defaultStyle.maxHeight; },
             get color() { return style?.color || defaultStyle.color; },
             get font() { return style?.font || defaultStyle.font; },
             get borderW() { return style?.borderW || defaultStyle.borderW; },
@@ -753,7 +780,6 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
         'img/dirt.png',
         'img/doors.png',
         'img/egg.png',
-        'img/empty.png',
         'img/fences.png',
         'img/furniture.png',
         'img/grass-biom-things.png',
@@ -800,14 +826,11 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
     #tools-container {
         x: (width < 600) ? width - 125 : width - 200;
         y: toolOffset + 10;
-        w: (width < 600) ? 124 : 199;
-        h: height - toolOffset - 10 - 1;
         gap: 5;
     }
 
     #atlas-list-container {
-        w: (width < 600) ? 90 : 150;
-        h: height - toolOffset - 10 - ((width < 600) ? 4 : 3);
+        maxHeight: height - toolOffset - 10 - ((width < 600) ? 4 : 3);
 
         borderW: 1;
         borderColor: 'darkgray';
@@ -843,42 +866,8 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
         (0, engine_2.listen)('mouseup', onClickHandler);
         (0, engine_2.listen)('resize', regenerateUI);
         (0, ui_1.addStylesUI)(styleContext, styles);
-        engine_2.canvas.addEventListener('contextmenu', e => {
-            const x = Math.floor(engine_2.mouseX / gridSize) * gridSize;
-            const y = Math.floor(engine_2.mouseY / gridSize) * gridSize;
-            objects = objects.filter(o => o.x !== x || o.y !== y);
-            e.preventDefault();
-            return false;
-        });
-        engine_2.canvas.addEventListener('wheel', e => {
-            if ((0, ui_1.handleScrollUI)(ui, e.deltaX, e.deltaY)) {
-                return;
-            }
-            gridSize = (0, util_3.clamp)(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
-        });
-        let touchY;
-        let touchId;
-        window.addEventListener('touchstart', e => {
-            // this disables two-finger zooming on safari
-            touchId = e.touches[0].identifier;
-            touchY = e.touches[0].clientY;
-            // BIG HACK
-            const ref = ENG;
-            ref.mouseX = e.touches[0].clientX;
-            ref.mouseY = e.touches[0].clientY;
-        }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
-        window.addEventListener('touchmove', e => {
-            const touch = [...e.touches].find(t => t.identifier === touchId);
-            if (!touch) {
-                return;
-            }
-            const deltaY = touch.clientY - touchY;
-            touchY = touch.clientY;
-            (0, ui_1.handleScrollUI)(ui, deltaY, deltaY);
-        }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
-        window.addEventListener('touchend', e => {
-            touchId = undefined;
-        }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
+        addScrollListeners();
+        addTouchListeners();
         loadAtlases();
     }
     exports.setup = setup;
@@ -887,22 +876,7 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
         (0, engine_2.removeShortcuts)(KbShortcuts);
     }
     exports.tearDown = tearDown;
-    function loadAtlases() {
-        let leftToLoad = assetPaths.length;
-        for (const p of assetPaths) {
-            const img = new Image();
-            img.onload = () => {
-                loadedAtlases[p] = img;
-                if (--leftToLoad === 0) {
-                    loading = false;
-                    (0, ui_1.addAtlasesUI)(loadedAtlases);
-                    regenerateUI();
-                }
-            };
-            img.src = p;
-        }
-    }
-    function draw(dt) {
+    function draw() {
         if (loading) {
             drawLoading();
             return;
@@ -1009,7 +983,7 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
         }
     };
     function createAtlasList() {
-        const list = atlasPaths.map((path, i) => {
+        const list = atlasPaths.map(path => {
             const text = path
                 .replace('img/', '')
                 .replace('.png', '');
@@ -1078,6 +1052,61 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
         currentTile = currentTile === x.data
             ? undefined
             : x.data;
+    }
+    function loadAtlases() {
+        let leftToLoad = assetPaths.length;
+        for (const p of assetPaths) {
+            const img = new Image();
+            img.onload = () => {
+                loadedAtlases[p] = img;
+                if (--leftToLoad === 0) {
+                    loading = false;
+                    (0, ui_1.addAtlasesUI)(loadedAtlases);
+                    regenerateUI();
+                }
+            };
+            img.src = p;
+        }
+    }
+    function addTouchListeners() {
+        let touchY;
+        let touchId;
+        window.addEventListener('touchstart', e => {
+            // this disables two-finger zooming on safari
+            touchId = e.touches[0].identifier;
+            touchY = e.touches[0].clientY;
+            // BIG HACK
+            const ref = ENG;
+            ref.mouseX = e.touches[0].clientX;
+            ref.mouseY = e.touches[0].clientY;
+        }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
+        window.addEventListener('touchmove', e => {
+            const touch = [...e.touches].find(t => t.identifier === touchId);
+            if (!touch) {
+                return;
+            }
+            const deltaY = touch.clientY - touchY;
+            touchY = touch.clientY;
+            (0, ui_1.handleScrollUI)(ui, deltaY, deltaY);
+        }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
+        window.addEventListener('touchend', () => {
+            touchId = undefined;
+        }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
+    }
+    function addScrollListeners() {
+        engine_2.canvas.addEventListener('contextmenu', e => {
+            const x = Math.floor(engine_2.mouseX / gridSize) * gridSize;
+            const y = Math.floor(engine_2.mouseY / gridSize) * gridSize;
+            objects = objects.filter(o => o.x !== x || o.y !== y);
+            e.preventDefault();
+            return false;
+        });
+        engine_2.canvas.addEventListener('wheel', e => {
+            if ((0, ui_1.handleScrollUI)(ui, e.deltaX, e.deltaY)) {
+                return;
+            }
+            gridSize = (0, util_3.clamp)(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
+        });
     }
 });
 define("game", ["require", "exports", "engine"], function (require, exports, engine_3) {
