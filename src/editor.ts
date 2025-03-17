@@ -138,53 +138,8 @@ export function setup() {
 
     addStylesUI(styleContext, styles);
 
-    canvas.addEventListener('contextmenu', e => {
-        const x = Math.floor(mouseX / gridSize) * gridSize;
-        const y = Math.floor(mouseY / gridSize) * gridSize;
-
-        objects = objects.filter(o => o.x !== x || o.y !== y);
-
-        e.preventDefault();
-        return false;
-    });
-
-    canvas.addEventListener('wheel', e => {
-        if (handleScrollUI(ui, e.deltaX, e.deltaY)) {
-            return;
-        }
-
-        gridSize = clamp(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
-    });
-
-    let touchY: number;
-    let touchId: number | undefined;
-
-    window.addEventListener('touchstart', e => {
-        // this disables two-finger zooming on safari
-        touchId = e.touches[0].identifier;
-        touchY = e.touches[0].clientY;
-
-        // BIG HACK
-        const ref = ENG;
-        ref.mouseX = e.touches[0].clientX;
-        ref.mouseY = e.touches[0].clientY;
-    }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
-
-    window.addEventListener('touchmove', e => {
-        const touch = [... e.touches].find(t => t.identifier === touchId);
-        if (!touch) {
-            return;
-        }
-
-        const deltaY = touch.clientY - touchY;
-        touchY = touch.clientY;
-
-        handleScrollUI(ui, deltaY, deltaY);
-    }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
-
-    window.addEventListener('touchend', e => {
-        touchId = undefined;
-    }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
+    addScrollListeners();
+    addTouchListeners();
 
     loadAtlases();
 }
@@ -192,26 +147,6 @@ export function setup() {
 export function tearDown() {
     unlisten('mouseup', onClickHandler);
     removeShortcuts(KbShortcuts);
-}
-
-function loadAtlases() {
-    let leftToLoad = assetPaths.length;
-
-    for (const p of assetPaths) {
-        const img = new Image();
-
-        img.onload = () => {
-            loadedAtlases[p] = img;
-
-            if (--leftToLoad === 0) {
-                loading = false;
-                addAtlasesUI(loadedAtlases);
-                regenerateUI();
-            }
-        };
-
-        img.src = p;
-    }
 }
 
 export function draw(dt: number) {
@@ -434,4 +369,76 @@ function onAtlasTileClick(x: ReturnType<typeof createAtlasTiles>[0]) {
     currentTile = currentTile === x.data
         ? undefined
         : x.data;
+}
+
+function loadAtlases() {
+    let leftToLoad = assetPaths.length;
+
+    for (const p of assetPaths) {
+        const img = new Image();
+
+        img.onload = () => {
+            loadedAtlases[p] = img;
+
+            if (--leftToLoad === 0) {
+                loading = false;
+                addAtlasesUI(loadedAtlases);
+                regenerateUI();
+            }
+        };
+
+        img.src = p;
+    }
+}
+
+function addTouchListeners() {
+    let touchY: number;
+    let touchId: number | undefined;
+
+    window.addEventListener('touchstart', e => {
+        // this disables two-finger zooming on safari
+        touchId = e.touches[0].identifier;
+        touchY = e.touches[0].clientY;
+
+        // BIG HACK
+        const ref = ENG;
+        ref.mouseX = e.touches[0].clientX;
+        ref.mouseY = e.touches[0].clientY;
+    }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
+
+    window.addEventListener('touchmove', e => {
+        const touch = [... e.touches].find(t => t.identifier === touchId);
+        if (!touch) {
+            return;
+        }
+
+        const deltaY = touch.clientY - touchY;
+        touchY = touch.clientY;
+
+        handleScrollUI(ui, deltaY, deltaY);
+    }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
+
+    window.addEventListener('touchend', e => {
+        touchId = undefined;
+    }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
+}
+
+function addScrollListeners() {
+    canvas.addEventListener('contextmenu', e => {
+        const x = Math.floor(mouseX / gridSize) * gridSize;
+        const y = Math.floor(mouseY / gridSize) * gridSize;
+
+        objects = objects.filter(o => o.x !== x || o.y !== y);
+
+        e.preventDefault();
+        return false;
+    });
+
+    canvas.addEventListener('wheel', e => {
+        if (handleScrollUI(ui, e.deltaX, e.deltaY)) {
+            return;
+        }
+
+        gridSize = clamp(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
+    });
 }
