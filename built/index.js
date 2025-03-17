@@ -381,7 +381,7 @@ define("mini-css", ["require", "exports"], function (require, exports) {
             return '';
         });
         if (left.trim()) {
-            console.warn(`Styles not fully parsed: <<<${left}>>>`);
+            console.warn(`Styles not fully parsed: <<<\n${left.trim()}\n>>>`);
         }
         const ctx = Object.create(Object.create(null), Object.getOwnPropertyDescriptors(ctx0));
         const varsEntries = vars.map(x => [x.name, { get: x.func }]);
@@ -430,7 +430,7 @@ define("mini-css", ["require", "exports"], function (require, exports) {
             return '';
         });
         if (left.trim()) {
-            console.warn(`Rule \`${name}\` not fully compiled: <<<${left}>>>`);
+            console.warn(`Rule \`${name}\` not fully compiled: <<<\n${left.trim()}\n>>>`);
         }
         return { name: name, extends: exts, props };
     }
@@ -445,7 +445,12 @@ define("mini-css", ["require", "exports"], function (require, exports) {
             .replace(/this\.___SAVED___/g, () => {
             return saved.shift();
         });
-        return Function(`return ${fixed}`);
+        try {
+            return Function(`return ${fixed}`);
+        }
+        catch (e) {
+            return undefined;
+        }
     }
     function applyExtends(x, xs, applied0) {
         if (!x.extends) {
@@ -513,9 +518,6 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                 case 'button':
                     drawButton(o);
                     break;
-                case 'old-button':
-                    drawOldButton(o);
-                    break;
                 case 'auto-container': drawAutoContainer(o);
             }
         }
@@ -582,26 +584,6 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         engine_1.ctx.lineTo(x + w, y + h);
         engine_1.ctx.stroke();
     }
-    function drawOldButton(o) {
-        if (o.inner.kind === 'text') {
-            engine_1.ctx.fillStyle = o.inner.color;
-            engine_1.ctx.font = o.inner.font;
-            const dims = engine_1.ctx.measureText(o.inner.text);
-            const ch = Math.round((o.h - dims.actualBoundingBoxAscent) / 2);
-            engine_1.ctx.fillText(o.inner.text, o.x + o.w - dims.width - 4 | 0, o.y + dims.actualBoundingBoxAscent + ch | 0);
-        }
-        if (o.inner.kind === 'image') {
-            const atlas = loadedAtlases[o.inner.src];
-            if (atlas) {
-                engine_1.ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, o.x, o.y, o.w, o.h);
-            }
-        }
-        if (o.borderW) {
-            engine_1.ctx.strokeStyle = o.color;
-            engine_1.ctx.lineWidth = o.borderW;
-            engine_1.ctx.strokeRect(o.x, o.y, o.w, o.h);
-        }
-    }
     function drawAutoContainer(o) {
         const ld = getOrCreateLayout(o);
         const totalHeight = o.mode === 'row'
@@ -658,16 +640,15 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         }
     }
     function getOrCreateLayout(o) {
-        const key = o.id + o.style;
-        const existing = layoutDataCache[key];
-        if (existing) {
-            return existing;
+        const existing = layoutDataCache[o.id];
+        if (existing && existing.style === o.style) {
+            return existing.layout;
         }
-        const style = o.style
+        const style = typeof o.style === 'string'
             ? styles[o.style]
-            : undefined;
+            : o.style;
         const ld = createLayoutData(style);
-        layoutDataCache[key] = ld;
+        layoutDataCache[o.id] = { style: o.style, layout: ld };
         return ld;
     }
     function createLayoutData(style) {
@@ -717,13 +698,6 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                     }
                     break;
                 }
-                case 'old-button': {
-                    if (engine_1.mouseX >= o.x && engine_1.mouseX <= o.x + o.w
-                        && engine_1.mouseY >= o.y && engine_1.mouseY <= o.y + o.h) {
-                        o.onClick(o);
-                        return true;
-                    }
-                }
             }
         }
         return false;
@@ -733,20 +707,19 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         for (const o of ui) {
             switch (o.kind) {
                 case 'button':
-                case 'old-button':
                     break;
                 case 'auto-container': {
                     const ld = getOrCreateLayout(o);
                     if (!(engine_1.mouseX >= ld.x && engine_1.mouseX <= ld.x + ld.w
                         && engine_1.mouseY >= ld.y && engine_1.mouseY <= ld.y + ld.h)) {
-                        return false;
+                        break;
                     }
                     // first try children
                     if (handleScrollUI(o.children, deltaX, deltaY)) {
                         return true;
                     }
                     if (!ld.scroll) {
-                        return false;
+                        break;
                     }
                     if (ld.scroll === 'x') {
                         ld.scrollX = (ld.scrollX || 0) + deltaX;
@@ -817,11 +790,33 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
         },
         get toolSize() {
             return toolSize;
+        },
+        get toolOffset() {
+            return toolOffset;
         }
     };
     const styles = `
 
-    toolOffset = height - (toolSize + 5) * 4 - 5 - 5;
+    #tiles-container {
+        x: 5;
+        y: toolOffset + 10;
+        w: (width < 600) ? width - 140 : width - 215;
+        h: height - toolOffset - 10;
+        gap: 5;
+
+        scroll: 'x';
+    }
+
+    .tile {
+        w: toolSize;
+        h: toolSize;
+    }
+
+    .tile-active {
+        ... .tile;
+        borderColor: '#cc0909';
+        borderW: 2;
+    }
 
     #tools-container {
         x: (width < 600) ? width - 125 : width - 200;
@@ -864,11 +859,12 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
     function setup() {
         (0, engine_2.registerShortcuts)(KbShortcuts);
         (0, engine_2.listen)('mouseup', onClickHandler);
-        (0, engine_2.listen)('resize', regenerateUI);
+        (0, engine_2.listen)('resize', onResize);
         (0, ui_1.addStylesUI)(styleContext, styles);
         addScrollListeners();
         addTouchListeners();
         loadAtlases();
+        onResize();
     }
     exports.setup = setup;
     function tearDown() {
@@ -942,16 +938,18 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
             return;
         }
     }
+    function onResize() {
+        engine_2.ctx.imageSmoothingEnabled = false;
+        toolSize = (engine_2.width < 600) ? 32 : 64;
+        toolOffset = engine_2.height - (toolSize + 5) * 4 - 5 - 5;
+    }
     function regenerateUI() {
         if (loading) {
             return;
         }
-        toolSize = (engine_2.width < 600) ? 32 : 64;
-        engine_2.ctx.imageSmoothingEnabled = false;
-        toolOffset = engine_2.height - (toolSize + 5) * 4 - 5 - 5;
         ui = [
             createToolsContainer(),
-            ...createAtlasTiles(),
+            createAtlasTiles(4),
         ];
     }
     function createToolsContainer() {
@@ -1012,28 +1010,25 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
         currentTile = undefined;
         regenerateUI();
     }
-    function createAtlasTiles() {
+    function createAtlasTiles(nRows) {
         const atlas = loadedAtlases[curAtlas];
-        const aw = atlas.width / sliceSize;
-        const ah = atlas.height / sliceSize;
-        const maxTiles = Math.floor((engine_2.width - 205) / (toolSize + 5)) * 4;
-        const count = Math.min(ah * aw, maxTiles);
-        const acc = [];
+        const ac = atlas.width / sliceSize;
+        const ar = atlas.height / sliceSize;
+        const count = ar * ac;
+        const cols = [];
+        let rows = [];
+        let currRow = [];
         for (let i = 0; i < count; ++i) {
-            const ax = i % aw;
-            const ay = i / aw | 0;
-            const tx = Math.floor(ay / 4) * aw + ax;
-            const ty = ay % 4;
+            const ax = i % ac;
+            const ay = i / ac | 0;
+            const data = { x: ax, y: ay };
             const btn = {
-                kind: 'old-button',
+                kind: 'button',
                 id: 'btn:' + ax + ':' + ay,
-                data: { x: ax, y: ay },
-                x: 5 + tx * (toolSize + 5),
-                y: toolOffset + 10 + ty * (toolSize + 5),
-                w: toolSize,
-                h: toolSize,
-                color: '#cc0909',
-                get borderW() { return currentTile === this.data ? 2 : 0; },
+                data,
+                get style() {
+                    return currentTile === data ? '.tile-active' : '.tile';
+                },
                 inner: {
                     kind: 'image',
                     src: curAtlas,
@@ -1044,9 +1039,38 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
                 },
                 onClick: onAtlasTileClick
             };
-            acc.push(btn);
+            currRow.push(btn);
+            if (i % ac === ac - 1) {
+                const container = {
+                    kind: 'auto-container',
+                    id: `tiles-row:${cols.length}:${rows.length}`,
+                    mode: 'row',
+                    children: currRow,
+                    style: { gap: 5 },
+                };
+                rows.push(container);
+                currRow = [];
+            }
+            if (rows.length === nRows || i === count - 1) {
+                const container = {
+                    kind: 'auto-container',
+                    id: `tiles-col:${cols.length}`,
+                    mode: 'column',
+                    children: rows,
+                    style: { gap: 5 },
+                };
+                cols.push(container);
+                rows = [];
+            }
         }
-        return acc;
+        const container = {
+            kind: 'auto-container',
+            id: 'tiles-container',
+            mode: 'row',
+            children: cols,
+            style: '#tiles-container',
+        };
+        return container;
     }
     function onAtlasTileClick(x) {
         currentTile = currentTile === x.data
