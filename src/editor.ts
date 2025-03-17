@@ -31,7 +31,6 @@ const atlasPaths = [
     'img/dirt.png',
     'img/doors.png',
     'img/egg.png',
-    'img/empty.png',
     'img/fences.png',
     'img/furniture.png',
     'img/grass-biom-things.png',
