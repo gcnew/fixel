@@ -262,7 +262,7 @@ function drawAutoContainer(o: AutoContainer<unknown>) {
 
         ctx.save();
         ctx.beginPath();
-        ctx.rect(ld.x - 1, ld.y - 1, ld.w + 1, ld.h + 1);
+        ctx.rect(ld.x - 0.5, ld.y - 0.5, ld.w + 0.5, ld.h + 0.5);
         ctx.clip();
     }
 
