@@ -1094,10 +1094,12 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
     }
     function addTouchListeners() {
         let touchY;
+        let touchX;
         let touchId;
         window.addEventListener('touchstart', e => {
             // this disables two-finger zooming on safari
             touchId = e.touches[0].identifier;
+            touchX = e.touches[0].clientX;
             touchY = e.touches[0].clientY;
             // BIG HACK
             const ref = ENG;
@@ -1109,9 +1111,11 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
             if (!touch) {
                 return;
             }
+            const deltaX = touch.clientX - touchX;
             const deltaY = touch.clientY - touchY;
+            touchX = touch.clientX;
             touchY = touch.clientY;
-            (0, ui_1.handleScrollUI)(ui, deltaY, deltaY);
+            (0, ui_1.handleScrollUI)(ui, deltaX, deltaY);
         }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
         window.addEventListener('touchend', () => {
             touchId = undefined;
