@@ -28,7 +28,7 @@ export function compileStyle<T>(ctx0: Object, style: string): { [k: string]: T|u
         });
 
     if (left.trim()) {
-        console.warn(`Styles not fully parsed: <<<${left}>>>`);
+        console.warn(`Styles not fully parsed: <<<\n${left.trim()}\n>>>`);
     }
 
     const ctx = Object.create(Object.create(null), Object.getOwnPropertyDescriptors(ctx0));
@@ -89,7 +89,7 @@ function compileRule(def: string): CompiledRule | undefined {
         });
 
     if (left.trim()) {
-        console.warn(`Rule \`${name}\` not fully compiled: <<<${left}>>>`);
+        console.warn(`Rule \`${name}\` not fully compiled: <<<\n${left.trim()}\n>>>`);
     }
 
     return { name: name, extends: exts, props };
@@ -107,7 +107,11 @@ function compileExpr(expr: string): Accessor['func'] | undefined {
             return saved.shift()!;
         });
 
-    return Function(`return ${fixed}`) as any;
+    try {
+        return Function(`return ${fixed}`) as any;
+    } catch (e) {
+        return undefined;
+    }
 }
 
 function applyExtends(x: CompiledRule, xs: CompiledRule[], applied0: string[]): CompiledRule {
