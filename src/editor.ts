@@ -59,6 +59,9 @@ let toolSize = 64;
 let gridSize = 64;
 let sliceSize = 16;
 let toolOffset: number;
+let smallScreen: boolean;
+
+const GridSizes = [ 16, 24, 32, 48, 64, 80, 96, 128 ];
 
 let objects: { x: number, y: number, tileX: number, tileY: number, atlas: string }[] = [];
 
@@ -82,7 +85,11 @@ const styleContext = {
 
     get toolOffset() {
         return toolOffset;
-    }
+    },
+
+    get smallScreen() {
+        return smallScreen;
+    },
 };
 
 const styles = `
@@ -90,7 +97,7 @@ const styles = `
     #tiles-container {
         x: 5;
         y: toolOffset + 10;
-        w: (width < 600) ? width - 140 : width - 215;
+        w: smallScreen ? width - 140 : width - 215;
         h: height - toolOffset - 10;
         gap: 5;
 
@@ -109,13 +116,13 @@ const styles = `
     }
 
     #tools-container {
-        x: (width < 600) ? width - 125 : width - 200;
+        x: smallScreen ? width - 125 : width - 200;
         y: toolOffset + 10;
         gap: 5;
     }
 
     #atlas-list-container {
-        maxHeight: height - toolOffset - 10 - ((width < 600) ? 4 : 3);
+        maxHeight: height - toolOffset - 10 - (smallScreen ? 4 : 3);
 
         borderW: 1;
         borderColor: 'darkgray';
@@ -123,21 +130,21 @@ const styles = `
     }
 
     #zoom-button {
-        w: (width < 600) ? 30 : 45;
-        h: (width < 600) ? 12 : 21;
+        w: smallScreen ? 30 : 45;
+        h: smallScreen ? 12 : 21;
         color: 'darkgray';
-        font: (width < 600) ? '9px monospace' : '14px monospace';
+        font: smallScreen ? '9px monospace' : '14px monospace';
         borderW: 1;
         borderColor: 'darkgray';
         marginRight: 5;
     }
 
     .atlas-list-button {
-        w: (width < 600) ? 89 : 149;
-        h: (width < 600) ? 12 : 21;
+        w: smallScreen ? 89 : 149;
+        h: smallScreen ? 12 : 21;
         borderW: 1;
         borderColor: 'darkgray';
-        font: (width < 600) ? '9px monospace' : '14px monospace';
+        font: smallScreen ? '9px monospace' : '14px monospace';
         color: 'darkgray';
     }
 
@@ -161,6 +168,8 @@ export function setup() {
 
     loadAtlases();
     onResize();
+
+    gridSize = smallScreen ? 24 : 64;
 }
 
 export function tearDown() {
@@ -258,7 +267,8 @@ function onClickHandler() {
 function onResize() {
     ctx.imageSmoothingEnabled = false;
 
-    toolSize = (width < 600) ? 32 : 64;
+    smallScreen = (width < 600 || height < 600);
+    toolSize = smallScreen ? 24 : 64;
     toolOffset = height - (toolSize + 5) * 4 - 5 - 5;
 }
 
@@ -298,10 +308,8 @@ const zoomButton: Button<undefined> = {
     },
 
     onClick: () => {
-        gridSize = gridSize + 16;
-        if (gridSize > 128) {
-            gridSize = 16;
-        }
+        const idx = (GridSizes.indexOf(gridSize) + 1) % GridSizes.length;
+        gridSize = GridSizes[idx]!;
     }
 };
 
@@ -498,6 +506,7 @@ function addScrollListeners() {
             return;
         }
 
-        gridSize = clamp(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
+        const idx = clamp(GridSizes.indexOf(gridSize) + (e.deltaY > 0 ? 1 : -1), 0, GridSizes.length - 1);
+        gridSize = GridSizes[idx]!;
     });
 }
