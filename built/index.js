@@ -152,7 +152,7 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
     let lastT = 0;
     let gameStop = false;
     exports.pressedKeys = {};
-    exports.isMac = /Mac/.test(navigator.platform);
+    exports.isMac = /Mac/.test(navigator.userAgent);
     let KbShortcuts = new Map();
     const eventRegistry = {};
     function setup() {
@@ -779,8 +779,12 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.draw = exports.tearDown = exports.setup = void 0;
+    const META_KEY = engine_2.isMac ? 'META' : 'CTRL';
     const KbShortcuts = [
         [onEscape, 'ESC'],
+        [historyUndo, `${META_KEY} + Z`],
+        [historyRedo, `${META_KEY} + SHIFT + Z`],
+        [historyRedo, `CTRL + Y`],
         [() => (0, ui_1.displayBoundingBoxes)(!(0, ui_1.displayBoundingBoxes)()), ']'],
     ];
     const atlasPaths = [
@@ -823,6 +827,8 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     let deleteMode = false;
     const GridSizes = [16, 24, 32, 48, 64, 80, 96, 128];
     let tiles = [];
+    let historyIndex = 0;
+    const history = [];
     let curAtlas = 'img/grass.png';
     let currentTile;
     let ui = [];
@@ -882,7 +888,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
 
     .small-button {
         w: smallScreen ? 30 : 45;
-        h: smallScreen ? 12 : 21;
+        h: smallScreen ? 14 : 21;
         color: 'darkgray';
         font: smallScreen ? '9px monospace' : '14px monospace';
         borderW: 1;
@@ -956,20 +962,27 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             const existing = tiles.find(t => t.x === x
                 && t.y === y
                 && t.atlas === curAtlas
-                && t.tileX === currentTile.x
-                && t.tileY === currentTile.y);
+                && t.atlasX === currentTile.x
+                && t.atlasY === currentTile.y);
             if (!existing) {
-                tiles.push({ x, y, tileX: currentTile.x, tileY: currentTile.y, atlas: curAtlas });
+                const tile = { x, y, atlasX: currentTile.x, atlasY: currentTile.y, atlas: curAtlas };
+                tiles.push(tile);
+                pushHistoryAction({ kind: 'add-tiles', tiles: [tile] });
             }
         }
     }
     function drawLoading() {
-        engine_2.ctx.clearRect(0, 0, engine_2.width, engine_2.height);
-        engine_2.ctx.fillStyle = '#34495E';
+        // clear the screen
+        engine_2.ctx.fillStyle = '#000';
+        engine_2.ctx.fillRect(0, 0, engine_2.width, engine_2.height);
+        engine_2.ctx.fillStyle = 'floralwhite';
         engine_2.ctx.font = '32px serif';
         const dots = (Date.now() % 1000) / 250 | 0;
         const dims = engine_2.ctx.measureText(`Loading ...`);
         engine_2.ctx.fillText(`Loading ${'.'.repeat(dots)}`, (engine_2.width - dims.width) / 2, (engine_2.height - dims.fontBoundingBoxAscent) / 2);
+        const progress = `${Object.keys(loadedAtlases).length} / ${assetPaths.length}`;
+        const pw = engine_2.ctx.measureText(progress).width;
+        engine_2.ctx.fillText(progress, (engine_2.width - pw) / 2, (engine_2.height - dims.fontBoundingBoxAscent) / 2 + 40);
     }
     function drawMainView() {
         engine_2.ctx.save();
@@ -995,7 +1008,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     function drawTiles() {
         for (const t of tiles) {
             const atlas = loadedAtlases[t.atlas];
-            engine_2.ctx.drawImage(atlas, t.tileX * sliceSize, t.tileY * sliceSize, sliceSize, sliceSize, t.x * gridSize, t.y * gridSize, gridSize, gridSize);
+            engine_2.ctx.drawImage(atlas, t.atlasX * sliceSize, t.atlasY * sliceSize, sliceSize, sliceSize, t.x * gridSize, t.y * gridSize, gridSize, gridSize);
         }
     }
     function drawCursor() {
@@ -1115,11 +1128,33 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             deleteMode = !deleteMode;
         }
     };
+    const undoButton = {
+        kind: 'button',
+        id: 'undo-button',
+        data: undefined,
+        style: '.small-button',
+        inner: {
+            kind: 'text',
+            text: 'UNDO',
+        },
+        onClick: historyUndo
+    };
+    const redoButton = {
+        kind: 'button',
+        id: 'redo-button',
+        data: undefined,
+        style: '.small-button',
+        inner: {
+            kind: 'text',
+            text: 'REDO',
+        },
+        onClick: historyRedo
+    };
     const smallTools = {
         kind: 'auto-container',
         id: 'small-tools-container',
         mode: 'column',
-        children: [zoomButton, tileRowsButton, deleteModeButton],
+        children: [zoomButton, tileRowsButton, deleteModeButton, undoButton, redoButton],
         style: { gap: 5 },
     };
     function createAtlasList() {
@@ -1232,6 +1267,12 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                     regenerateUI();
                 }
             };
+            let attempts = 1;
+            img.onerror = () => {
+                if (attempts < 3) {
+                    img.src = p + `?attempt=${++attempts}`;
+                }
+            };
             img.src = p;
         }
     }
@@ -1264,6 +1305,35 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     }
     function toTileCoordinates(x, y) {
         return { x: Math.floor(x / gridSize), y: Math.floor(y / gridSize) };
+    }
+    function pushHistoryAction(action) {
+        if (historyIndex !== history.length) {
+            history.splice(historyIndex, history.length - historyIndex);
+        }
+        history.push(action);
+        historyIndex = history.length;
+    }
+    function historyUndo() {
+        if (historyIndex === 0) {
+            return;
+        }
+        const action = history[--historyIndex];
+        switch (action.kind) {
+            case 'add-tiles': {
+                tiles = tiles.filter(x => !action.tiles.includes(x));
+            }
+        }
+    }
+    function historyRedo() {
+        if (historyIndex === history.length) {
+            return;
+        }
+        const action = history[historyIndex++];
+        switch (action.kind) {
+            case 'add-tiles': {
+                tiles.push(...action.tiles);
+            }
+        }
     }
 });
 define("game", ["require", "exports", "engine"], function (require, exports, engine_3) {
