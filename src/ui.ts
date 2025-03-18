@@ -1,7 +1,7 @@
 
 import {
     ctx,
-    mouseX, mouseY
+    mouseX, mouseY, clickX, clickY
 } from './engine'
 
 import { compileStyle } from './mini-css'
@@ -336,6 +336,10 @@ export function handleClickUI(ui: UI<unknown>[]): boolean {
     for (const o of ui) {
         switch (o.kind) {
             case 'auto-container': {
+                if (!isClickInside(o)) {
+                    break;
+                }
+
                 if (handleClickUI(o.children)) {
                     return true;
                 }
@@ -344,11 +348,7 @@ export function handleClickUI(ui: UI<unknown>[]): boolean {
             }
 
             case 'button': {
-                const ld = getOrCreateLayout(o);
-
-                if (mouseX >= ld.x && mouseX <= ld.x + ld.w
-                    && mouseY >= ld.y && mouseY <= ld.y + ld.h) {
-
+                if (isClickInside(o)) {
                     o.onClick(o);
                     return true;
                 }
@@ -361,6 +361,15 @@ export function handleClickUI(ui: UI<unknown>[]): boolean {
     return false;
 }
 
+function isClickInside(o: UI<unknown>) {
+    const ld = getOrCreateLayout(o);
+
+    return clickX! >= ld.x && clickX! <= ld.x + ld.w
+        && clickY! >= ld.y && clickY! <= ld.y + ld.h
+        && mouseX >= ld.x && mouseX <= ld.x + ld.w
+        && mouseY >= ld.y && mouseY <= ld.y + ld.h;
+}
+
 export function handleScrollUI(ui: UI<unknown>[], deltaX: number, deltaY: number): boolean {
     for (const o of ui) {
         switch (o.kind) {
@@ -370,8 +379,8 @@ export function handleScrollUI(ui: UI<unknown>[], deltaX: number, deltaY: number
             case 'auto-container': {
                 const ld = getOrCreateLayout(o);
 
-                if (!(mouseX >= ld.x && mouseX <= ld.x + ld.w
-                    && mouseY >= ld.y && mouseY <= ld.y + ld.h)) {
+                if (!(clickX! >= ld.x && clickX! <= ld.x + ld.w
+                    && clickY! >= ld.y && clickY! <= ld.y + ld.h)) {
                     break;
                 }
 

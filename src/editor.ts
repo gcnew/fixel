@@ -4,7 +4,7 @@ import {
 
     canvas, ctx,
 
-    width, height, mouseX, mouseY,
+    width, height, mouseX, mouseY, clickY,
     listen, unlisten, registerShortcuts, removeShortcuts,
 } from './engine'
 
@@ -209,7 +209,7 @@ export function draw() {
 }
 
 function beforeDraw() {
-    if (mouseDown && mouseY <= toolsOffset) {
+    if (mouseDown && clickY! <= toolsOffset && mouseY <= toolsOffset) {
         const { x, y } = toTileCoordinates(mouseX, mouseY);
 
         if (deleteMode) {
@@ -310,7 +310,10 @@ function onEscape() {
 
 function onMouseUp(e: Extract<VEvent, { kind: 'mouseup' }>) {
     mouseDown = false;
-    deleteMode = false;
+
+    if (e.button === 'secondary') {
+        deleteMode = false;
+    }
 
     if (e.button === 'primary' && handleClickUI(ui)) {
         return;

@@ -139,13 +139,18 @@ export function setup() {
     });
 
     canvas.addEventListener('touchstart', e => {
-        mouseX = e.touches[0]!.clientX;
-        mouseY = e.touches[0]!.clientY;
+        clickX = mouseX = e.touches[0]!.clientX;
+        clickY = mouseY = e.touches[0]!.clientY;
     });
 
     canvas.addEventListener('touchmove', e => {
         mouseX = e.touches[0]!.clientX;
         mouseY = e.touches[0]!.clientY;
+    });
+
+    window.addEventListener('touchend', () => {
+        clickX = undefined;
+        clickY = undefined;
     });
 }
 
