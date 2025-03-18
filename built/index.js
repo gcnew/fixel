@@ -146,7 +146,7 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
     exports.removeDebugMsg = exports.addDebugMsg = exports.raise = exports.unlisten = exports.listen = exports.toggleRun = exports.toggleDebug = exports.removeShortcuts = exports.registerShortcuts = exports.setGameObject = exports.setup = exports.isMac = exports.clickY = exports.clickX = exports.mouseY = exports.mouseX = exports.pressedKeys = exports.debug = exports.height = exports.width = exports.ctx = exports.canvas = void 0;
     let game;
     let drawGame;
-    exports.debug = true;
+    exports.debug = false;
     const frameWindow = 1000;
     let frameRateBuffer = [];
     let lastT = 0;
@@ -231,12 +231,16 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
             exports.clickY = undefined;
         });
         exports.canvas.addEventListener('touchstart', e => {
-            exports.mouseX = e.touches[0].clientX;
-            exports.mouseY = e.touches[0].clientY;
+            exports.clickX = exports.mouseX = e.touches[0].clientX;
+            exports.clickY = exports.mouseY = e.touches[0].clientY;
         });
         exports.canvas.addEventListener('touchmove', e => {
             exports.mouseX = e.touches[0].clientX;
             exports.mouseY = e.touches[0].clientY;
+        });
+        window.addEventListener('touchend', () => {
+            exports.clickX = undefined;
+            exports.clickY = undefined;
         });
     }
     exports.setup = setup;
@@ -709,15 +713,16 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         for (const o of ui) {
             switch (o.kind) {
                 case 'auto-container': {
+                    if (!isClickInside(o)) {
+                        break;
+                    }
                     if (handleClickUI(o.children)) {
                         return true;
                     }
                     break;
                 }
                 case 'button': {
-                    const ld = getOrCreateLayout(o);
-                    if (engine_1.mouseX >= ld.x && engine_1.mouseX <= ld.x + ld.w
-                        && engine_1.mouseY >= ld.y && engine_1.mouseY <= ld.y + ld.h) {
+                    if (isClickInside(o)) {
                         o.onClick(o);
                         return true;
                     }
@@ -728,6 +733,13 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         return false;
     }
     exports.handleClickUI = handleClickUI;
+    function isClickInside(o) {
+        const ld = getOrCreateLayout(o);
+        return engine_1.clickX >= ld.x && engine_1.clickX <= ld.x + ld.w
+            && engine_1.clickY >= ld.y && engine_1.clickY <= ld.y + ld.h
+            && engine_1.mouseX >= ld.x && engine_1.mouseX <= ld.x + ld.w
+            && engine_1.mouseY >= ld.y && engine_1.mouseY <= ld.y + ld.h;
+    }
     function handleScrollUI(ui, deltaX, deltaY) {
         for (const o of ui) {
             switch (o.kind) {
@@ -735,8 +747,8 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                     break;
                 case 'auto-container': {
                     const ld = getOrCreateLayout(o);
-                    if (!(engine_1.mouseX >= ld.x && engine_1.mouseX <= ld.x + ld.w
-                        && engine_1.mouseY >= ld.y && engine_1.mouseY <= ld.y + ld.h)) {
+                    if (!(engine_1.clickX >= ld.x && engine_1.clickX <= ld.x + ld.w
+                        && engine_1.clickY >= ld.y && engine_1.clickY <= ld.y + ld.h)) {
                         break;
                     }
                     // first try children
@@ -928,7 +940,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     }
     exports.draw = draw;
     function beforeDraw() {
-        if (mouseDown && engine_2.mouseY <= toolsOffset) {
+        if (mouseDown && engine_2.clickY <= toolsOffset && engine_2.mouseY <= toolsOffset) {
             const { x, y } = toTileCoordinates(engine_2.mouseX, engine_2.mouseY);
             if (deleteMode) {
                 tiles = tiles.filter(t => t.x !== x || t.y !== y);
@@ -996,7 +1008,9 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             const x = Math.floor(engine_2.mouseX / gridSize) * gridSize;
             const y = Math.floor(engine_2.mouseY / gridSize) * gridSize;
             const atlas = loadedAtlases[curAtlas];
+            engine_2.ctx.globalAlpha = 0.75;
             engine_2.ctx.drawImage(atlas, currentTile.x * sliceSize, currentTile.y * sliceSize, sliceSize, sliceSize, x, y, gridSize, gridSize);
+            engine_2.ctx.globalAlpha = 1;
         }
     }
     function onEscape() {
@@ -1005,7 +1019,9 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     }
     function onMouseUp(e) {
         mouseDown = false;
-        deleteMode = false;
+        if (e.button === 'secondary') {
+            deleteMode = false;
+        }
         if (e.button === 'primary' && (0, ui_1.handleClickUI)(ui)) {
             return;
         }
@@ -1311,7 +1327,7 @@ define("index", ["require", "exports", "editor", "engine"], function (require, e
     Object.defineProperty(exports, "__esModule", { value: true });
     Game = __importStar(Game);
     let KbShortcuts = [
-        [engine_4.toggleDebug, 'D'],
+        [engine_4.toggleDebug, '['],
     ];
     window.onload = function () {
         (0, engine_4.setup)();
