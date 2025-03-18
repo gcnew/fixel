@@ -17,7 +17,7 @@ export let ctx: CanvasRenderingContext2D;
 export let width: number;
 export let height: number;
 
-export let debug: boolean = true;
+export let debug: boolean = false;
 
 const frameWindow = 1000;
 let   frameRateBuffer: number[] = [];

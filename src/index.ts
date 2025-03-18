@@ -5,7 +5,7 @@ import { Shortcut } from './keyboard'
 import { setup, setGameObject, registerShortcuts, toggleDebug } from './engine'
 
 let KbShortcuts: Shortcut[] = [
-    [toggleDebug,  'D'],
+    [toggleDebug,  '['],
 ];
 
 window.onload = function() {

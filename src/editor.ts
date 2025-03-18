@@ -297,7 +297,9 @@ function drawCursor() {
         const y = Math.floor(mouseY / gridSize) * gridSize;
         const atlas = loadedAtlases[curAtlas]!;
 
+        ctx.globalAlpha = 0.75;
         ctx.drawImage(atlas, currentTile.x * sliceSize, currentTile.y * sliceSize , sliceSize, sliceSize, x, y, gridSize, gridSize);
+        ctx.globalAlpha = 1;
     }
 }
 
