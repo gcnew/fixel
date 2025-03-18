@@ -193,6 +193,7 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
             KbShortcuts.get(sigil)?.();
         });
         window.addEventListener('mousemove', e => {
+            // TODO: should clip left/top too (e.g. if the canvas is in the middle of the screen)
             exports.mouseX = (0, util_1.clamp)(e.pageX, 0, exports.width);
             exports.mouseY = (0, util_1.clamp)(e.pageY, 0, exports.height);
         });
@@ -235,6 +236,7 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
             exports.clickY = exports.mouseY = e.touches[0].clientY;
         });
         exports.canvas.addEventListener('touchmove', e => {
+            // TODO: should clip
             exports.mouseX = e.touches[0].clientX;
             exports.mouseY = e.touches[0].clientY;
         });
@@ -713,7 +715,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         for (const o of ui) {
             switch (o.kind) {
                 case 'auto-container': {
-                    if (!isClickInside(o)) {
+                    if (!isMouseActionInside(o, false)) {
                         break;
                     }
                     if (handleClickUI(o.children)) {
@@ -722,7 +724,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                     break;
                 }
                 case 'button': {
-                    if (isClickInside(o)) {
+                    if (isMouseActionInside(o, false)) {
                         o.onClick(o);
                         return true;
                     }
@@ -733,36 +735,37 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         return false;
     }
     exports.handleClickUI = handleClickUI;
-    function isClickInside(o) {
+    function isMouseActionInside(o, isWheel) {
         const ld = getOrCreateLayout(o);
-        return engine_1.clickX >= ld.x && engine_1.clickX <= ld.x + ld.w
-            && engine_1.clickY >= ld.y && engine_1.clickY <= ld.y + ld.h
+        const isWheelOrClickInside = isWheel
+            || (engine_1.clickX >= ld.x && engine_1.clickX <= ld.x + ld.w
+                && engine_1.clickY >= ld.y && engine_1.clickY <= ld.y + ld.h);
+        return isWheelOrClickInside
             && engine_1.mouseX >= ld.x && engine_1.mouseX <= ld.x + ld.w
             && engine_1.mouseY >= ld.y && engine_1.mouseY <= ld.y + ld.h;
     }
-    function handleScrollUI(ui, deltaX, deltaY) {
+    function handleScrollUI(ui, deltaX, deltaY, isWheel) {
         for (const o of ui) {
             switch (o.kind) {
                 case 'button':
                     break;
                 case 'auto-container': {
-                    const ld = getOrCreateLayout(o);
-                    if (!(engine_1.clickX >= ld.x && engine_1.clickX <= ld.x + ld.w
-                        && engine_1.clickY >= ld.y && engine_1.clickY <= ld.y + ld.h)) {
+                    if (!isMouseActionInside(o, isWheel)) {
                         break;
                     }
-                    // first try children
-                    if (handleScrollUI(o.children, deltaX, deltaY)) {
+                    // try the children first
+                    if (handleScrollUI(o.children, deltaX, deltaY, isWheel)) {
                         return true;
                     }
+                    const ld = getOrCreateLayout(o);
                     if (!ld.scroll) {
                         break;
                     }
                     if (ld.scroll === 'x') {
-                        ld.scrollX = (ld.scrollX || 0) + deltaX;
+                        ld.scrollX = ld.scrollX + deltaX;
                     }
                     else {
-                        ld.scrollY = (ld.scrollY || 0) + deltaY;
+                        ld.scrollY = ld.scrollY + deltaY;
                     }
                     return true;
                 }
@@ -1040,7 +1043,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         toolsOffset = engine_2.height - (toolSize + 5) * 4 - 5 - 5;
     }
     function onScrollListener(e) {
-        if ((0, ui_1.handleScrollUI)(ui, e.deltaX, e.deltaY)) {
+        if ((0, ui_1.handleScrollUI)(ui, e.deltaX, e.deltaY, true)) {
             return;
         }
         const idx = (0, util_3.clamp)(GridSizes.indexOf(gridSize) + (e.deltaY > 0 ? 1 : -1), 0, GridSizes.length - 1);
@@ -1252,7 +1255,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             const deltaY = touch.clientY - touchY;
             touchX = touch.clientX;
             touchY = touch.clientY;
-            (0, ui_1.handleScrollUI)(ui, deltaX, deltaY);
+            (0, ui_1.handleScrollUI)(ui, deltaX, deltaY, false);
         }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
         window.addEventListener('touchend', () => {
             touchId = undefined;
