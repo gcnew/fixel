@@ -55,6 +55,7 @@ const loadedAtlases: { [k: string]: HTMLImageElement } = {};
 
 let loading = true;
 
+let tileRows = 4;
 let toolSize = 64;
 let gridSize = 64;
 let sliceSize = 16;
@@ -129,14 +130,13 @@ const styles = `
         scroll: 'y';
     }
 
-    #zoom-button {
+    .small-button {
         w: smallScreen ? 30 : 45;
         h: smallScreen ? 12 : 21;
         color: 'darkgray';
         font: smallScreen ? '9px monospace' : '14px monospace';
         borderW: 1;
         borderColor: 'darkgray';
-        marginRight: 5;
     }
 
     .atlas-list-button {
@@ -289,7 +289,7 @@ function regenerateUI() {
 
     ui = [
         createToolsContainer(),
-        createAtlasTiles(4),
+        createAtlasTiles(tileRows),
     ];
 }
 
@@ -298,7 +298,7 @@ function createToolsContainer() {
         kind: 'auto-container',
         id: 'tools-container',
         mode: 'row',
-        children: [ zoomButton, createAtlasList() ],
+        children: [ smallTools, createAtlasList() ],
         style: '#tools-container',
     };
 
@@ -307,9 +307,9 @@ function createToolsContainer() {
 
 const zoomButton: Button<undefined> = {
     kind: 'button',
-    id: 'zoomButton',
+    id: 'zoom-button',
     data: undefined,
-    style: '#zoom-button',
+    style: '.small-button',
     inner: {
         kind: 'text',
         get text() {
@@ -321,6 +321,32 @@ const zoomButton: Button<undefined> = {
         const idx = (GridSizes.indexOf(gridSize) + 1) % GridSizes.length;
         gridSize = GridSizes[idx]!;
     }
+};
+
+const tileRowsButton: Button<undefined> = {
+    kind: 'button',
+    id: 'tile-rows-button',
+    data: undefined,
+    style: '.small-button',
+    inner: {
+        kind: 'text',
+        get text() {
+            return '#' + tileRows;
+        }
+    },
+
+    onClick: () => {
+        tileRows = tileRows === 4 ? 3 : 4;
+        regenerateUI();
+    }
+};
+
+const smallTools: AutoContainer<undefined> = {
+    kind: 'auto-container',
+    id: 'small-tools-container',
+    mode: 'column',
+    children: [ zoomButton, tileRowsButton ],
+    style: { gap: 5 },
 };
 
 function createAtlasList(): AutoContainer<undefined> {
