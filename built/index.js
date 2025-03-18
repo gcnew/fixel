@@ -202,16 +202,41 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
             }
             exports.clickX = e.offsetX;
             exports.clickY = e.offsetY;
-            raise({ kind: 'mousedown', clickX: exports.clickX, clickY: exports.clickY });
+            raise({ kind: 'mousedown', clickX: exports.clickX, clickY: exports.clickY, button: e.button === 0 ? 'primary' : 'secondary', preventDefault: false });
+        });
+        exports.canvas.addEventListener('contextmenu', e => {
+            exports.clickX = e.offsetX;
+            exports.clickY = e.offsetY;
+            const customEvent = {
+                kind: 'mousedown',
+                clickX: exports.clickX,
+                clickY: exports.clickY,
+                button: e.button === 0 ? 'primary' : 'secondary',
+                preventDefault: false
+            };
+            raise(customEvent);
+            if (customEvent.preventDefault) {
+                e.preventDefault();
+                return false;
+            }
+            return undefined;
         });
         // listen on the window for mouse-up, otherwise the event is not received if clicked outside of the window or canvas
         window.addEventListener('mouseup', e => {
-            if (e.button !== 0) {
+            if (e.button !== 0 && e.button !== 2) {
                 return;
             }
-            raise({ kind: 'mouseup', clickX: exports.clickX, clickY: exports.clickY });
+            raise({ kind: 'mouseup', clickX: exports.clickX, clickY: exports.clickY, button: e.button === 0 ? 'primary' : 'secondary' });
             exports.clickX = undefined;
             exports.clickY = undefined;
+        });
+        exports.canvas.addEventListener('touchstart', e => {
+            exports.mouseX = e.touches[0].clientX;
+            exports.mouseY = e.touches[0].clientY;
+        });
+        exports.canvas.addEventListener('touchmove', e => {
+            exports.mouseX = e.touches[0].clientX;
+            exports.mouseY = e.touches[0].clientY;
         });
     }
     exports.setup = setup;
@@ -735,11 +760,10 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
     }
     exports.handleScrollUI = handleScrollUI;
 });
-define("editor", ["require", "exports", "engine", "engine", "util", "ui"], function (require, exports, engine_2, ENG, util_3, ui_1) {
+define("editor", ["require", "exports", "engine", "util", "ui"], function (require, exports, engine_2, util_3, ui_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.draw = exports.tearDown = exports.setup = void 0;
-    ENG = __importStar(ENG);
     const KbShortcuts = [
         [onEscape, 'ESC'],
         [() => (0, ui_1.displayBoundingBoxes)(!(0, ui_1.displayBoundingBoxes)()), ']'],
@@ -769,17 +793,21 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
     ];
     const assetPaths = [
         'img/empty.png',
+        'img/delete.png',
         ...atlasPaths
     ];
     const loadedAtlases = {};
     let loading = true;
+    let tileRows = 4;
     let toolSize = 64;
     let gridSize = 64;
     let sliceSize = 16;
-    let toolOffset;
+    let toolsOffset;
     let smallScreen;
+    let mouseDown = false;
+    let deleteMode = false;
     const GridSizes = [16, 24, 32, 48, 64, 80, 96, 128];
-    let objects = [];
+    let tiles = [];
     let curAtlas = 'img/grass.png';
     let currentTile;
     let ui = [];
@@ -793,8 +821,8 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
         get toolSize() {
             return toolSize;
         },
-        get toolOffset() {
-            return toolOffset;
+        get toolsOffset() {
+            return toolsOffset;
         },
         get smallScreen() {
             return smallScreen;
@@ -804,9 +832,9 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
 
     #tiles-container {
         x: 5;
-        y: toolOffset + 10;
+        y: toolsOffset + 10;
         w: smallScreen ? width - 140 : width - 215;
-        h: height - toolOffset - 10;
+        h: height - toolsOffset - 10;
         gap: 5;
 
         scroll: 'x';
@@ -825,26 +853,30 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
 
     #tools-container {
         x: smallScreen ? width - 125 : width - 200;
-        y: toolOffset + 10;
+        y: toolsOffset + 10;
         gap: 5;
     }
 
     #atlas-list-container {
-        maxHeight: height - toolOffset - 10 - (smallScreen ? 4 : 3);
+        maxHeight: height - toolsOffset - 10 - (smallScreen ? 4 : 3);
 
         borderW: 1;
         borderColor: 'darkgray';
         scroll: 'y';
     }
 
-    #zoom-button {
+    .small-button {
         w: smallScreen ? 30 : 45;
         h: smallScreen ? 12 : 21;
         color: 'darkgray';
         font: smallScreen ? '9px monospace' : '14px monospace';
         borderW: 1;
         borderColor: 'darkgray';
-        marginRight: 5;
+    }
+
+    .small-button-active {
+        ... .small-button;
+        color: 'floralwhite';
     }
 
     .atlas-list-button {
@@ -863,19 +895,23 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
 `;
     function setup() {
         (0, engine_2.registerShortcuts)(KbShortcuts);
-        (0, engine_2.listen)('mouseup', onClickHandler);
+        (0, engine_2.listen)('mouseup', onMouseUp);
+        (0, engine_2.listen)('mousedown', onMouseDown);
         (0, engine_2.listen)('resize', onResize);
-        (0, ui_1.addStylesUI)(styleContext, styles);
-        addScrollListeners();
+        engine_2.canvas.addEventListener('wheel', onScrollListener);
         addTouchListeners();
+        (0, ui_1.addStylesUI)(styleContext, styles);
         loadAtlases();
         onResize();
         gridSize = smallScreen ? 24 : 64;
     }
     exports.setup = setup;
     function tearDown() {
-        (0, engine_2.unlisten)('mouseup', onClickHandler);
         (0, engine_2.removeShortcuts)(KbShortcuts);
+        (0, engine_2.unlisten)('mouseup', onMouseUp);
+        (0, engine_2.unlisten)('mousedown', onMouseDown);
+        (0, engine_2.unlisten)('resize', onResize);
+        engine_2.canvas.removeEventListener('wheel', onScrollListener);
     }
     exports.tearDown = tearDown;
     function draw() {
@@ -886,12 +922,32 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
         // clear the screen
         engine_2.ctx.fillStyle = '#000';
         engine_2.ctx.fillRect(0, 0, engine_2.width, engine_2.height);
+        beforeDraw();
         (0, ui_1.drawUI)(ui);
-        drawGrid();
-        drawObjects();
-        drawCursor();
+        drawMainView();
     }
     exports.draw = draw;
+    function beforeDraw() {
+        if (mouseDown && engine_2.mouseY <= toolsOffset) {
+            const { x, y } = toTileCoordinates(engine_2.mouseX, engine_2.mouseY);
+            if (deleteMode) {
+                tiles = tiles.filter(t => t.x !== x || t.y !== y);
+                return;
+            }
+            if (!currentTile) {
+                return;
+            }
+            // check if this exact tile is already present at this location
+            const existing = tiles.find(t => t.x === x
+                && t.y === y
+                && t.atlas === curAtlas
+                && t.tileX === currentTile.x
+                && t.tileY === currentTile.y);
+            if (!existing) {
+                tiles.push({ x, y, tileX: currentTile.x, tileY: currentTile.y, atlas: curAtlas });
+            }
+        }
+    }
     function drawLoading() {
         engine_2.ctx.clearRect(0, 0, engine_2.width, engine_2.height);
         engine_2.ctx.fillStyle = '#34495E';
@@ -900,55 +956,79 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
         const dims = engine_2.ctx.measureText(`Loading ...`);
         engine_2.ctx.fillText(`Loading ${'.'.repeat(dots)}`, (engine_2.width - dims.width) / 2, (engine_2.height - dims.fontBoundingBoxAscent) / 2);
     }
+    function drawMainView() {
+        engine_2.ctx.save();
+        engine_2.ctx.beginPath();
+        engine_2.ctx.rect(0, 0, engine_2.width, toolsOffset + 1);
+        engine_2.ctx.clip();
+        drawGrid();
+        drawTiles();
+        drawCursor();
+        engine_2.ctx.restore();
+    }
     function drawGrid() {
         engine_2.ctx.fillStyle = 'darkgray';
         for (let x = 0; x < engine_2.width; x += gridSize) {
-            engine_2.ctx.fillRect(x, 0, 1, toolOffset);
+            engine_2.ctx.fillRect(x, 0, 1, toolsOffset);
         }
-        for (let y = 0; y < toolOffset; y += gridSize) {
+        for (let y = 0; y < toolsOffset; y += gridSize) {
             engine_2.ctx.fillRect(0, y, engine_2.width, 1);
         }
         // the last horizontal line (in case of off-tile height)
-        engine_2.ctx.fillRect(0, toolOffset, engine_2.width, 1);
+        engine_2.ctx.fillRect(0, toolsOffset, engine_2.width, 1);
     }
-    function drawObjects() {
-        for (const o of objects) {
-            const atlas = loadedAtlases[o.atlas];
-            engine_2.ctx.drawImage(atlas, o.tileX * sliceSize, o.tileY * sliceSize, sliceSize, sliceSize, o.x, o.y, gridSize, gridSize);
+    function drawTiles() {
+        for (const t of tiles) {
+            const atlas = loadedAtlases[t.atlas];
+            engine_2.ctx.drawImage(atlas, t.tileX * sliceSize, t.tileY * sliceSize, sliceSize, sliceSize, t.x * gridSize, t.y * gridSize, gridSize, gridSize);
         }
     }
     function drawCursor() {
-        if (!currentTile) {
+        engine_2.canvas.style.cursor = (deleteMode && engine_2.mouseY <= toolsOffset) ? 'none' : 'initial';
+        if (engine_2.mouseY > toolsOffset) {
             return;
         }
-        if (engine_2.mouseY > toolOffset) {
-            return;
+        if (deleteMode) {
+            const deleteIcon = loadedAtlases['img/delete.png'];
+            engine_2.ctx.drawImage(deleteIcon, engine_2.mouseX - 16, engine_2.mouseY - 16, 32, 32);
         }
-        const x = Math.floor(engine_2.mouseX / gridSize) * gridSize;
-        const y = Math.floor(engine_2.mouseY / gridSize) * gridSize;
-        const atlas = loadedAtlases[curAtlas];
-        engine_2.ctx.drawImage(atlas, currentTile.x * sliceSize, currentTile.y * sliceSize, sliceSize, sliceSize, x, y, gridSize, gridSize);
-    }
-    function onEscape() {
-        currentTile = undefined;
-    }
-    function onClickHandler() {
-        (0, ui_1.handleClickUI)(ui);
-        if (engine_2.mouseY <= toolOffset) {
-            if (!currentTile) {
-                return;
-            }
+        if (currentTile && !deleteMode) {
             const x = Math.floor(engine_2.mouseX / gridSize) * gridSize;
             const y = Math.floor(engine_2.mouseY / gridSize) * gridSize;
-            objects.push({ x, y, tileX: currentTile.x, tileY: currentTile.y, atlas: curAtlas });
+            const atlas = loadedAtlases[curAtlas];
+            engine_2.ctx.drawImage(atlas, currentTile.x * sliceSize, currentTile.y * sliceSize, sliceSize, sliceSize, x, y, gridSize, gridSize);
+        }
+    }
+    function onEscape() {
+        deleteMode = false;
+        currentTile = undefined;
+    }
+    function onMouseUp(e) {
+        mouseDown = false;
+        deleteMode = false;
+        if (e.button === 'primary' && (0, ui_1.handleClickUI)(ui)) {
             return;
+        }
+    }
+    function onMouseDown(e) {
+        mouseDown = true;
+        if (e.button === 'secondary') {
+            deleteMode = true;
+            e.preventDefault = true;
         }
     }
     function onResize() {
         engine_2.ctx.imageSmoothingEnabled = false;
         smallScreen = (engine_2.width < 600 || engine_2.height < 600);
         toolSize = smallScreen ? 24 : 64;
-        toolOffset = engine_2.height - (toolSize + 5) * 4 - 5 - 5;
+        toolsOffset = engine_2.height - (toolSize + 5) * 4 - 5 - 5;
+    }
+    function onScrollListener(e) {
+        if ((0, ui_1.handleScrollUI)(ui, e.deltaX, e.deltaY)) {
+            return;
+        }
+        const idx = (0, util_3.clamp)(GridSizes.indexOf(gridSize) + (e.deltaY > 0 ? 1 : -1), 0, GridSizes.length - 1);
+        gridSize = GridSizes[idx];
     }
     function regenerateUI() {
         if (loading) {
@@ -956,7 +1036,7 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
         }
         ui = [
             createToolsContainer(),
-            createAtlasTiles(4),
+            createAtlasTiles(tileRows),
         ];
     }
     function createToolsContainer() {
@@ -964,16 +1044,16 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
             kind: 'auto-container',
             id: 'tools-container',
             mode: 'row',
-            children: [zoomButton, createAtlasList()],
+            children: [smallTools, createAtlasList()],
             style: '#tools-container',
         };
         return container;
     }
     const zoomButton = {
         kind: 'button',
-        id: 'zoomButton',
+        id: 'zoom-button',
         data: undefined,
-        style: '#zoom-button',
+        style: '.small-button',
         inner: {
             kind: 'text',
             get text() {
@@ -984,6 +1064,44 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
             const idx = (GridSizes.indexOf(gridSize) + 1) % GridSizes.length;
             gridSize = GridSizes[idx];
         }
+    };
+    const tileRowsButton = {
+        kind: 'button',
+        id: 'tile-rows-button',
+        data: undefined,
+        style: '.small-button',
+        inner: {
+            kind: 'text',
+            get text() {
+                return '#' + tileRows;
+            }
+        },
+        onClick: () => {
+            tileRows = tileRows === 4 ? 3 : 4;
+            regenerateUI();
+        }
+    };
+    const deleteModeButton = {
+        kind: 'button',
+        id: 'delete-mode-button',
+        data: undefined,
+        get style() {
+            return deleteMode ? '.small-button-active' : '.small-button';
+        },
+        inner: {
+            kind: 'text',
+            text: 'DEL',
+        },
+        onClick: () => {
+            deleteMode = !deleteMode;
+        }
+    };
+    const smallTools = {
+        kind: 'auto-container',
+        id: 'small-tools-container',
+        mode: 'column',
+        children: [zoomButton, tileRowsButton, deleteModeButton],
+        style: { gap: 5 },
     };
     function createAtlasList() {
         const list = atlasPaths.map(path => {
@@ -1078,6 +1196,7 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
         return container;
     }
     function onAtlasTileClick(x) {
+        deleteMode = false;
         currentTile = currentTile === x.data
             ? undefined
             : x.data;
@@ -1106,10 +1225,7 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
             touchId = e.touches[0].identifier;
             touchX = e.touches[0].clientX;
             touchY = e.touches[0].clientY;
-            // BIG HACK
-            const ref = ENG;
-            ref.mouseX = e.touches[0].clientX;
-            ref.mouseY = e.touches[0].clientY;
+            mouseDown = true;
         }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
         window.addEventListener('touchmove', e => {
             const touch = [...e.touches].find(t => t.identifier === touchId);
@@ -1124,23 +1240,11 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
         }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
         window.addEventListener('touchend', () => {
             touchId = undefined;
+            mouseDown = false;
         }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
     }
-    function addScrollListeners() {
-        engine_2.canvas.addEventListener('contextmenu', e => {
-            const x = Math.floor(engine_2.mouseX / gridSize) * gridSize;
-            const y = Math.floor(engine_2.mouseY / gridSize) * gridSize;
-            objects = objects.filter(o => o.x !== x || o.y !== y);
-            e.preventDefault();
-            return false;
-        });
-        engine_2.canvas.addEventListener('wheel', e => {
-            if ((0, ui_1.handleScrollUI)(ui, e.deltaX, e.deltaY)) {
-                return;
-            }
-            const idx = (0, util_3.clamp)(GridSizes.indexOf(gridSize) + (e.deltaY > 0 ? 1 : -1), 0, GridSizes.length - 1);
-            gridSize = GridSizes[idx];
-        });
+    function toTileCoordinates(x, y) {
+        return { x: Math.floor(x / gridSize), y: Math.floor(y / gridSize) };
     }
 });
 define("game", ["require", "exports", "engine"], function (require, exports, engine_3) {
