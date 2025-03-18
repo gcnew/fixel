@@ -234,15 +234,21 @@ function beforeDraw() {
 }
 
 function drawLoading() {
-    ctx.clearRect(0, 0, width, height);
+    // clear the screen
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, width, height);
 
-    ctx.fillStyle = '#34495E';
+    ctx.fillStyle = 'floralwhite';
     ctx.font = '32px serif';
 
     const dots = (Date.now() % 1000) / 250 | 0;
     const dims = ctx.measureText(`Loading ...`);
 
     ctx.fillText(`Loading ${'.'.repeat(dots)}`, (width - dims.width) / 2, (height - dims.fontBoundingBoxAscent) / 2);
+
+    const progress = `${Object.keys(loadedAtlases).length} / ${assetPaths.length}`;
+    const pw = ctx.measureText(progress).width;
+    ctx.fillText(progress, (width - pw) / 2, (height - dims.fontBoundingBoxAscent) / 2 + 40);
 }
 
 function drawMainView() {
@@ -564,6 +570,13 @@ function loadAtlases() {
                 loading = false;
                 addAtlasesUI(loadedAtlases);
                 regenerateUI();
+            }
+        };
+
+        let attempts = 1;
+        img.onerror = () => {
+            if (attempts < 3) {
+                img.src = p + `?attempt=${++attempts}`;
             }
         };
 
