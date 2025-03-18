@@ -1,12 +1,12 @@
 
 import {
+    type VEvent,
+
     canvas, ctx,
 
     width, height, mouseX, mouseY,
     listen, unlisten, registerShortcuts, removeShortcuts,
 } from './engine'
-
-import * as ENG from './engine'
 
 import { clamp } from './util'
 import type { Shortcut } from './keyboard'
@@ -48,6 +48,7 @@ const atlasPaths = [
 
 const assetPaths = [
     'img/empty.png',
+    'img/delete.png',
     ... atlasPaths
 ];
 
@@ -61,6 +62,9 @@ let gridSize = 64;
 let sliceSize = 16;
 let toolsOffset: number;
 let smallScreen: boolean;
+
+let mouseDown = false;
+let deleteMode = false;
 
 const GridSizes = [ 16, 24, 32, 48, 64, 80, 96, 128 ];
 
@@ -139,6 +143,11 @@ const styles = `
         borderColor: 'darkgray';
     }
 
+    .small-button-active {
+        ... .small-button;
+        color: 'floralwhite';
+    }
+
     .atlas-list-button {
         w: smallScreen ? 89 : 149;
         h: smallScreen ? 12 : 21;
@@ -158,14 +167,14 @@ export function setup() {
 
     registerShortcuts(KbShortcuts);
 
-    listen('mouseup', onClickHandler);
+    listen('mouseup', onMouseUp);
+    listen('mousedown', onMouseDown);
     listen('resize', onResize);
 
-    addStylesUI(styleContext, styles);
-
-    addScrollListeners();
+    canvas.addEventListener('wheel', onScrollListener);
     addTouchListeners();
 
+    addStylesUI(styleContext, styles);
     loadAtlases();
     onResize();
 
@@ -173,8 +182,14 @@ export function setup() {
 }
 
 export function tearDown() {
-    unlisten('mouseup', onClickHandler);
+
     removeShortcuts(KbShortcuts);
+
+    unlisten('mouseup', onMouseUp);
+    unlisten('mousedown', onMouseDown);
+    unlisten('resize', onResize);
+
+    canvas.removeEventListener('wheel', onScrollListener);
 }
 
 export function draw() {
@@ -187,8 +202,35 @@ export function draw() {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, width, height);
 
+    beforeDraw();
+
     drawUI(ui);
     drawMainView();
+}
+
+function beforeDraw() {
+    if (mouseDown && mouseY <= toolsOffset) {
+        const { x, y } = toTileCoordinates(mouseX, mouseY);
+
+        if (deleteMode) {
+            tiles = tiles.filter(t => t.x !== x || t.y !== y);
+            return;
+        }
+
+        if (!currentTile) {
+            return;
+        }
+
+        // check if this exact tile is already present at this location
+        const existing = tiles.find(t => t.x === x
+                                         && t.y === y
+                                         && t.atlas === curAtlas
+                                         && t.tileX === currentTile!.x
+                                         && t.tileY === currentTile!.y);
+        if (!existing) {
+            tiles.push({ x, y, tileX: currentTile.x, tileY: currentTile.y, atlas: curAtlas });
+        }
+    }
 }
 
 function drawLoading() {
@@ -202,7 +244,6 @@ function drawLoading() {
 
     ctx.fillText(`Loading ${'.'.repeat(dots)}`, (width - dims.width) / 2, (height - dims.fontBoundingBoxAscent) / 2);
 }
-
 
 function drawMainView() {
     ctx.save();
@@ -239,37 +280,47 @@ function drawTiles() {
 }
 
 function drawCursor() {
-    if (!currentTile) {
-        return;
-    }
+    canvas.style.cursor = (deleteMode && mouseY <= toolsOffset) ? 'none' : 'initial';
 
     if (mouseY > toolsOffset) {
         return;
     }
 
-    const x = Math.floor(mouseX / gridSize) * gridSize;
-    const y = Math.floor(mouseY / gridSize) * gridSize;
-    const atlas = loadedAtlases[curAtlas]!;
+    if (deleteMode) {
+        const deleteIcon = loadedAtlases['img/delete.png']!;
 
-    ctx.drawImage(atlas, currentTile.x * sliceSize, currentTile.y * sliceSize , sliceSize, sliceSize, x, y, gridSize, gridSize);
+        ctx.drawImage(deleteIcon, mouseX - 16, mouseY - 16, 32, 32);
+    }
+
+    if (currentTile && !deleteMode) {
+        const x = Math.floor(mouseX / gridSize) * gridSize;
+        const y = Math.floor(mouseY / gridSize) * gridSize;
+        const atlas = loadedAtlases[curAtlas]!;
+
+        ctx.drawImage(atlas, currentTile.x * sliceSize, currentTile.y * sliceSize , sliceSize, sliceSize, x, y, gridSize, gridSize);
+    }
 }
 
 function onEscape() {
+    deleteMode = false;
     currentTile = undefined;
 }
 
-function onClickHandler() {
-    handleClickUI(ui);
+function onMouseUp(e: Extract<VEvent, { kind: 'mouseup' }>) {
+    mouseDown = false;
+    deleteMode = false;
 
-    if (mouseY <= toolsOffset) {
-        if (!currentTile) {
-            return;
-        }
-
-        const { x, y } = toTileCoordinates(mouseX, mouseY);
-        tiles.push({ x, y, tileX: currentTile.x, tileY: currentTile.y, atlas: curAtlas });
-
+    if (e.button === 'primary' && handleClickUI(ui)) {
         return;
+    }
+}
+
+function onMouseDown(e: Extract<VEvent, { kind: 'mousedown' }>) {
+    mouseDown = true;
+
+    if (e.button === 'secondary') {
+        deleteMode = true;
+        e.preventDefault = true;
     }
 }
 
@@ -279,6 +330,15 @@ function onResize() {
     smallScreen = (width < 600 || height < 600);
     toolSize = smallScreen ? 24 : 64;
     toolsOffset = height - (toolSize + 5) * 4 - 5 - 5;
+}
+
+function onScrollListener(e: WheelEvent) {
+    if (handleScrollUI(ui, e.deltaX, e.deltaY)) {
+        return;
+    }
+
+    const idx = clamp(GridSizes.indexOf(gridSize) + (e.deltaY > 0 ? 1 : -1), 0, GridSizes.length - 1);
+    gridSize = GridSizes[idx]!;
 }
 
 function regenerateUI() {
@@ -340,11 +400,28 @@ const tileRowsButton: Button<undefined> = {
     }
 };
 
+const deleteModeButton: Button<undefined> = {
+    kind: 'button',
+    id: 'delete-mode-button',
+    data: undefined,
+    get style() {
+        return deleteMode ? '.small-button-active' : '.small-button';
+    },
+    inner: {
+        kind: 'text',
+        text: 'DEL',
+    },
+
+    onClick: () => {
+        deleteMode = !deleteMode;
+    }
+};
+
 const smallTools: AutoContainer<undefined> = {
     kind: 'auto-container',
     id: 'small-tools-container',
     mode: 'column',
-    children: [ zoomButton, tileRowsButton ],
+    children: [ zoomButton, tileRowsButton, deleteModeButton ],
     style: { gap: 5 },
 };
 
@@ -463,6 +540,7 @@ function createAtlasTiles(nRows: number): AutoContainer<{ x: number, y: number }
 }
 
 function onAtlasTileClick(x: Button<NonNullable<typeof currentTile>>) {
+    deleteMode = false;
     currentTile = currentTile === x.data
         ? undefined
         : x.data;
@@ -499,10 +577,7 @@ function addTouchListeners() {
         touchX = e.touches[0]!.clientX;
         touchY = e.touches[0]!.clientY;
 
-        // BIG HACK
-        const ref = ENG;
-        ref.mouseX = e.touches[0]!.clientX;
-        ref.mouseY = e.touches[0]!.clientY;
+        mouseDown = true;
     }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 
     window.addEventListener('touchmove', e => {
@@ -522,27 +597,8 @@ function addTouchListeners() {
 
     window.addEventListener('touchend', () => {
         touchId = undefined;
+        mouseDown = false;
     }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
-}
-
-function addScrollListeners() {
-    canvas.addEventListener('contextmenu', e => {
-        const { x, y } = toTileCoordinates(mouseX, mouseY);
-
-        tiles = tiles.filter(o => o.x !== x || o.y !== y);
-
-        e.preventDefault();
-        return false;
-    });
-
-    canvas.addEventListener('wheel', e => {
-        if (handleScrollUI(ui, e.deltaX, e.deltaY)) {
-            return;
-        }
-
-        const idx = clamp(GridSizes.indexOf(gridSize) + (e.deltaY > 0 ? 1 : -1), 0, GridSizes.length - 1);
-        gridSize = GridSizes[idx]!;
-    });
 }
 
 function toTileCoordinates(x: number, y: number) {

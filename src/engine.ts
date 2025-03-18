@@ -38,8 +38,8 @@ export const isMac = /Mac/.test(navigator.platform);
 
 let KbShortcuts: Map<string, () => void> = new Map();
 
-export type VEvent = { kind: 'mouseup',   clickX: number, clickY: number }
-                   | { kind: 'mousedown', clickX: number, clickY: number }
+export type VEvent = { kind: 'mouseup',   clickX: number, clickY: number, button: 'primary' | 'secondary' }
+                   | { kind: 'mousedown', clickX: number, clickY: number, button: 'primary' | 'secondary', preventDefault: boolean }
                    | { kind: 'resize' }
 
 const eventRegistry: { [E in VEvent['kind']]?: ((e: Extract<VEvent, { kind: E }>) => void)[] } = {};
@@ -102,19 +102,50 @@ export function setup() {
 
         clickX = e.offsetX;
         clickY = e.offsetY;
-        raise({ kind: 'mousedown', clickX: clickX!, clickY: clickY! });
+        raise({ kind: 'mousedown', clickX: clickX!, clickY: clickY!, button: e.button === 0 ? 'primary' : 'secondary', preventDefault: false });
+    });
+
+    canvas.addEventListener('contextmenu', e => {
+        clickX = e.offsetX;
+        clickY = e.offsetY;
+
+        const customEvent: VEvent = {
+            kind: 'mousedown',
+            clickX: clickX!,
+            clickY: clickY!,
+            button: e.button === 0 ? 'primary' : 'secondary',
+            preventDefault: false
+        };
+
+        raise(customEvent);
+        if (customEvent.preventDefault) {
+            e.preventDefault();
+            return false;
+        }
+
+        return undefined;
     });
 
     // listen on the window for mouse-up, otherwise the event is not received if clicked outside of the window or canvas
     window.addEventListener('mouseup', e => {
-        if (e.button !== 0) {
+        if (e.button !== 0 && e.button !== 2) {
             return;
         }
 
-        raise({ kind: 'mouseup', clickX: clickX!, clickY: clickY! });
+        raise({ kind: 'mouseup', clickX: clickX!, clickY: clickY!, button: e.button === 0 ? 'primary' : 'secondary' });
 
         clickX = undefined;
         clickY = undefined;
+    });
+
+    canvas.addEventListener('touchstart', e => {
+        mouseX = e.touches[0]!.clientX;
+        mouseY = e.touches[0]!.clientY;
+    });
+
+    canvas.addEventListener('touchmove', e => {
+        mouseX = e.touches[0]!.clientX;
+        mouseY = e.touches[0]!.clientY;
     });
 }
 
