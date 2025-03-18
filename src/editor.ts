@@ -58,12 +58,12 @@ let loading = true;
 let toolSize = 64;
 let gridSize = 64;
 let sliceSize = 16;
-let toolOffset: number;
+let toolsOffset: number;
 let smallScreen: boolean;
 
 const GridSizes = [ 16, 24, 32, 48, 64, 80, 96, 128 ];
 
-let objects: { x: number, y: number, tileX: number, tileY: number, atlas: string }[] = [];
+let tiles: { x: number, y: number, tileX: number, tileY: number, atlas: string }[] = [];
 
 let curAtlas = 'img/grass.png';
 let currentTile: { x: number, y: number } | undefined;
@@ -83,8 +83,8 @@ const styleContext = {
         return toolSize;
     },
 
-    get toolOffset() {
-        return toolOffset;
+    get toolsOffset() {
+        return toolsOffset;
     },
 
     get smallScreen() {
@@ -96,9 +96,9 @@ const styles = `
 
     #tiles-container {
         x: 5;
-        y: toolOffset + 10;
+        y: toolsOffset + 10;
         w: smallScreen ? width - 140 : width - 215;
-        h: height - toolOffset - 10;
+        h: height - toolsOffset - 10;
         gap: 5;
 
         scroll: 'x';
@@ -117,12 +117,12 @@ const styles = `
 
     #tools-container {
         x: smallScreen ? width - 125 : width - 200;
-        y: toolOffset + 10;
+        y: toolsOffset + 10;
         gap: 5;
     }
 
     #atlas-list-container {
-        maxHeight: height - toolOffset - 10 - (smallScreen ? 4 : 3);
+        maxHeight: height - toolsOffset - 10 - (smallScreen ? 4 : 3);
 
         borderW: 1;
         borderColor: 'darkgray';
@@ -188,9 +188,7 @@ export function draw() {
     ctx.fillRect(0, 0, width, height);
 
     drawUI(ui);
-    drawGrid();
-    drawObjects();
-    drawCursor();
+    drawMainView();
 }
 
 function drawLoading() {
@@ -205,26 +203,38 @@ function drawLoading() {
     ctx.fillText(`Loading ${'.'.repeat(dots)}`, (width - dims.width) / 2, (height - dims.fontBoundingBoxAscent) / 2);
 }
 
-function drawGrid() {
 
+function drawMainView() {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, width, toolsOffset + 1);
+    ctx.clip();
+
+    drawGrid();
+    drawCursor();
+    drawTiles();
+
+    ctx.restore();
+}
+
+function drawGrid() {
     ctx.fillStyle = 'darkgray';
     for (let x = 0; x < width; x += gridSize) {
-        ctx.fillRect(x, 0, 1, toolOffset);
+        ctx.fillRect(x, 0, 1, toolsOffset);
     }
 
-    for (let y = 0; y < toolOffset; y += gridSize) {
+    for (let y = 0; y < toolsOffset; y += gridSize) {
         ctx.fillRect(0, y, width, 1);
     }
 
     // the last horizontal line (in case of off-tile height)
-    ctx.fillRect(0, toolOffset, width, 1);
+    ctx.fillRect(0, toolsOffset, width, 1);
 }
 
-function drawObjects() {
-    for (const o of objects) {
-        const atlas = loadedAtlases[o.atlas]!;
-
-        ctx.drawImage(atlas, o.tileX * sliceSize, o.tileY * sliceSize, sliceSize, sliceSize, o.x, o.y, gridSize, gridSize);
+function drawTiles() {
+    for (const t of tiles) {
+        const atlas = loadedAtlases[t.atlas]!;
+        ctx.drawImage(atlas, t.tileX * sliceSize, t.tileY * sliceSize, sliceSize, sliceSize, t.x, t.y, gridSize, gridSize);
     }
 }
 
@@ -233,7 +243,7 @@ function drawCursor() {
         return;
     }
 
-    if (mouseY > toolOffset) {
+    if (mouseY > toolsOffset) {
         return;
     }
 
@@ -251,14 +261,14 @@ function onEscape() {
 function onClickHandler() {
     handleClickUI(ui);
 
-    if (mouseY <= toolOffset) {
+    if (mouseY <= toolsOffset) {
         if (!currentTile) {
             return;
         }
 
         const x = Math.floor(mouseX / gridSize) * gridSize;
         const y = Math.floor(mouseY / gridSize) * gridSize;
-        objects.push({ x, y, tileX: currentTile.x, tileY: currentTile.y, atlas: curAtlas });
+        tiles.push({ x, y, tileX: currentTile.x, tileY: currentTile.y, atlas: curAtlas });
 
         return;
     }
@@ -269,7 +279,7 @@ function onResize() {
 
     smallScreen = (width < 600 || height < 600);
     toolSize = smallScreen ? 24 : 64;
-    toolOffset = height - (toolSize + 5) * 4 - 5 - 5;
+    toolsOffset = height - (toolSize + 5) * 4 - 5 - 5;
 }
 
 function regenerateUI() {
@@ -495,7 +505,7 @@ function addScrollListeners() {
         const x = Math.floor(mouseX / gridSize) * gridSize;
         const y = Math.floor(mouseY / gridSize) * gridSize;
 
-        objects = objects.filter(o => o.x !== x || o.y !== y);
+        tiles = tiles.filter(o => o.x !== x || o.y !== y);
 
         e.preventDefault();
         return false;
