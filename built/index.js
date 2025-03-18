@@ -777,6 +777,8 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
     let gridSize = 64;
     let sliceSize = 16;
     let toolOffset;
+    let smallScreen;
+    const GridSizes = [16, 24, 32, 48, 64, 80, 96, 128];
     let objects = [];
     let curAtlas = 'img/grass.png';
     let currentTile;
@@ -793,14 +795,17 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
         },
         get toolOffset() {
             return toolOffset;
-        }
+        },
+        get smallScreen() {
+            return smallScreen;
+        },
     };
     const styles = `
 
     #tiles-container {
         x: 5;
         y: toolOffset + 10;
-        w: (width < 600) ? width - 140 : width - 215;
+        w: smallScreen ? width - 140 : width - 215;
         h: height - toolOffset - 10;
         gap: 5;
 
@@ -819,13 +824,13 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
     }
 
     #tools-container {
-        x: (width < 600) ? width - 125 : width - 200;
+        x: smallScreen ? width - 125 : width - 200;
         y: toolOffset + 10;
         gap: 5;
     }
 
     #atlas-list-container {
-        maxHeight: height - toolOffset - 10 - ((width < 600) ? 4 : 3);
+        maxHeight: height - toolOffset - 10 - (smallScreen ? 4 : 3);
 
         borderW: 1;
         borderColor: 'darkgray';
@@ -833,21 +838,21 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
     }
 
     #zoom-button {
-        w: (width < 600) ? 30 : 45;
-        h: (width < 600) ? 12 : 21;
+        w: smallScreen ? 30 : 45;
+        h: smallScreen ? 12 : 21;
         color: 'darkgray';
-        font: (width < 600) ? '9px monospace' : '14px monospace';
+        font: smallScreen ? '9px monospace' : '14px monospace';
         borderW: 1;
         borderColor: 'darkgray';
         marginRight: 5;
     }
 
     .atlas-list-button {
-        w: (width < 600) ? 89 : 149;
-        h: (width < 600) ? 12 : 21;
+        w: smallScreen ? 89 : 149;
+        h: smallScreen ? 12 : 21;
         borderW: 1;
         borderColor: 'darkgray';
-        font: (width < 600) ? '9px monospace' : '14px monospace';
+        font: smallScreen ? '9px monospace' : '14px monospace';
         color: 'darkgray';
     }
 
@@ -865,6 +870,7 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
         addTouchListeners();
         loadAtlases();
         onResize();
+        gridSize = smallScreen ? 24 : 64;
     }
     exports.setup = setup;
     function tearDown() {
@@ -940,7 +946,8 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
     }
     function onResize() {
         engine_2.ctx.imageSmoothingEnabled = false;
-        toolSize = (engine_2.width < 600) ? 32 : 64;
+        smallScreen = (engine_2.width < 600 || engine_2.height < 600);
+        toolSize = smallScreen ? 24 : 64;
         toolOffset = engine_2.height - (toolSize + 5) * 4 - 5 - 5;
     }
     function regenerateUI() {
@@ -974,10 +981,8 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
             }
         },
         onClick: () => {
-            gridSize = gridSize + 16;
-            if (gridSize > 128) {
-                gridSize = 16;
-            }
+            const idx = (GridSizes.indexOf(gridSize) + 1) % GridSizes.length;
+            gridSize = GridSizes[idx];
         }
     };
     function createAtlasList() {
@@ -1133,7 +1138,8 @@ define("editor", ["require", "exports", "engine", "engine", "util", "ui"], funct
             if ((0, ui_1.handleScrollUI)(ui, e.deltaX, e.deltaY)) {
                 return;
             }
-            gridSize = (0, util_3.clamp)(gridSize + (e.deltaY > 0 ? 16 : -16), 16, 128);
+            const idx = (0, util_3.clamp)(GridSizes.indexOf(gridSize) + (e.deltaY > 0 ? 1 : -1), 0, GridSizes.length - 1);
+            gridSize = GridSizes[idx];
         });
     }
 });
