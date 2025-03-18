@@ -211,8 +211,8 @@ function drawMainView() {
     ctx.clip();
 
     drawGrid();
-    drawCursor();
     drawTiles();
+    drawCursor();
 
     ctx.restore();
 }
@@ -234,7 +234,7 @@ function drawGrid() {
 function drawTiles() {
     for (const t of tiles) {
         const atlas = loadedAtlases[t.atlas]!;
-        ctx.drawImage(atlas, t.tileX * sliceSize, t.tileY * sliceSize, sliceSize, sliceSize, t.x, t.y, gridSize, gridSize);
+        ctx.drawImage(atlas, t.tileX * sliceSize, t.tileY * sliceSize, sliceSize, sliceSize, t.x * gridSize, t.y * gridSize, gridSize, gridSize);
     }
 }
 
@@ -266,8 +266,7 @@ function onClickHandler() {
             return;
         }
 
-        const x = Math.floor(mouseX / gridSize) * gridSize;
-        const y = Math.floor(mouseY / gridSize) * gridSize;
+        const { x, y } = toTileCoordinates(mouseX, mouseY);
         tiles.push({ x, y, tileX: currentTile.x, tileY: currentTile.y, atlas: curAtlas });
 
         return;
@@ -528,8 +527,7 @@ function addTouchListeners() {
 
 function addScrollListeners() {
     canvas.addEventListener('contextmenu', e => {
-        const x = Math.floor(mouseX / gridSize) * gridSize;
-        const y = Math.floor(mouseY / gridSize) * gridSize;
+        const { x, y } = toTileCoordinates(mouseX, mouseY);
 
         tiles = tiles.filter(o => o.x !== x || o.y !== y);
 
@@ -545,4 +543,8 @@ function addScrollListeners() {
         const idx = clamp(GridSizes.indexOf(gridSize) + (e.deltaY > 0 ? 1 : -1), 0, GridSizes.length - 1);
         gridSize = GridSizes[idx]!;
     });
+}
+
+function toTileCoordinates(x: number, y: number) {
+    return { x: Math.floor(x / gridSize), y: Math.floor(y / gridSize) };
 }
