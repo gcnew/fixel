@@ -4,7 +4,7 @@ import {
 
     canvas, ctx,
 
-    width, height, mouseX, mouseY, clickY,
+    width, height, mouseX, mouseY, clickY, isMac,
     listen, unlisten, registerShortcuts, removeShortcuts,
 } from './engine'
 
@@ -17,8 +17,17 @@ import {
 } from './ui'
 
 
+type Action    = { kind: 'add-tiles', tiles: Tile[] }
+type Tile      = { x: number, y: number, atlasX: number, atlasY: number, atlas: string }
+
+const META_KEY = isMac ? 'META' : 'CTRL';
+
 const KbShortcuts: Shortcut[] = [
-    [onEscape, 'ESC'],
+    [onEscape,    'ESC'],
+    [historyUndo, `${META_KEY} + Z`],
+    [historyRedo, `${META_KEY} + SHIFT + Z`],
+    [historyRedo, `CTRL + Y`],
+
     [() => displayBoundingBoxes(!displayBoundingBoxes()), ']'],
 ];
 
@@ -68,7 +77,10 @@ let deleteMode = false;
 
 const GridSizes = [ 16, 24, 32, 48, 64, 80, 96, 128 ];
 
-let tiles: { x: number, y: number, tileX: number, tileY: number, atlas: string }[] = [];
+let tiles: Tile[] = [];
+
+let historyIndex = 0;
+const history: Action[] = [];
 
 let curAtlas = 'img/grass.png';
 let currentTile: { x: number, y: number } | undefined;
@@ -136,7 +148,7 @@ const styles = `
 
     .small-button {
         w: smallScreen ? 30 : 45;
-        h: smallScreen ? 12 : 21;
+        h: smallScreen ? 14 : 21;
         color: 'darkgray';
         font: smallScreen ? '9px monospace' : '14px monospace';
         borderW: 1;
@@ -225,10 +237,12 @@ function beforeDraw() {
         const existing = tiles.find(t => t.x === x
                                          && t.y === y
                                          && t.atlas === curAtlas
-                                         && t.tileX === currentTile!.x
-                                         && t.tileY === currentTile!.y);
+                                         && t.atlasX === currentTile!.x
+                                         && t.atlasY === currentTile!.y);
         if (!existing) {
-            tiles.push({ x, y, tileX: currentTile.x, tileY: currentTile.y, atlas: curAtlas });
+            const tile = { x, y, atlasX: currentTile.x, atlasY: currentTile.y, atlas: curAtlas };
+            tiles.push(tile);
+            pushHistoryAction({ kind: 'add-tiles', tiles: [tile] });
         }
     }
 }
@@ -281,7 +295,7 @@ function drawGrid() {
 function drawTiles() {
     for (const t of tiles) {
         const atlas = loadedAtlases[t.atlas]!;
-        ctx.drawImage(atlas, t.tileX * sliceSize, t.tileY * sliceSize, sliceSize, sliceSize, t.x * gridSize, t.y * gridSize, gridSize, gridSize);
+        ctx.drawImage(atlas, t.atlasX * sliceSize, t.atlasY * sliceSize, sliceSize, sliceSize, t.x * gridSize, t.y * gridSize, gridSize, gridSize);
     }
 }
 
@@ -428,11 +442,35 @@ const deleteModeButton: Button<undefined> = {
     }
 };
 
+const undoButton: Button<undefined> = {
+    kind: 'button',
+    id: 'undo-button',
+    data: undefined,
+    style: '.small-button',
+    inner: {
+        kind: 'text',
+        text: 'UNDO',
+    },
+    onClick: historyUndo
+};
+
+const redoButton: Button<undefined> = {
+    kind: 'button',
+    id: 'redo-button',
+    data: undefined,
+    style: '.small-button',
+    inner: {
+        kind: 'text',
+        text: 'REDO',
+    },
+    onClick: historyRedo
+};
+
 const smallTools: AutoContainer<undefined> = {
     kind: 'auto-container',
     id: 'small-tools-container',
     mode: 'column',
-    children: [ zoomButton, tileRowsButton, deleteModeButton ],
+    children: [ zoomButton, tileRowsButton, deleteModeButton, undoButton, redoButton ],
     style: { gap: 5 },
 };
 
@@ -621,4 +659,39 @@ function addTouchListeners() {
 
 function toTileCoordinates(x: number, y: number) {
     return { x: Math.floor(x / gridSize), y: Math.floor(y / gridSize) };
+}
+
+function pushHistoryAction(action: Action) {
+    if (historyIndex !== history.length) {
+        history.splice(historyIndex, history.length - historyIndex)
+    }
+
+    history.push(action);
+    historyIndex = history.length;
+}
+
+function historyUndo() {
+    if (historyIndex === 0) {
+        return;
+    }
+
+    const action = history[--historyIndex]!;
+    switch (action.kind) {
+        case 'add-tiles': {
+            tiles = tiles.filter(x => !action.tiles.includes(x));
+        }
+    }
+}
+
+function historyRedo() {
+    if (historyIndex === history.length) {
+        return;
+    }
+
+    const action = history[historyIndex++]!;
+    switch (action.kind) {
+        case 'add-tiles': {
+            tiles.push(... action.tiles);
+        }
+    }
 }

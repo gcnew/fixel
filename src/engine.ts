@@ -34,7 +34,7 @@ export let mouseY: number;
 export let clickX: number | undefined;
 export let clickY: number | undefined;
 
-export const isMac = /Mac/.test(navigator.platform);
+export const isMac = /Mac/.test(navigator.userAgent);
 
 let KbShortcuts: Map<string, () => void> = new Map();
 
