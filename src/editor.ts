@@ -338,7 +338,7 @@ function onResize() {
 }
 
 function onScrollListener(e: WheelEvent) {
-    if (handleScrollUI(ui, e.deltaX, e.deltaY)) {
+    if (handleScrollUI(ui, e.deltaX, e.deltaY, true)) {
         return;
     }
 
@@ -597,7 +597,7 @@ function addTouchListeners() {
         touchX = touch.clientX;
         touchY = touch.clientY;
 
-        handleScrollUI(ui, deltaX, deltaY);
+        handleScrollUI(ui, deltaX, deltaY, false);
     }, { passive: false /* in safari defaults to `true` for touch and scroll events */ });
 
     window.addEventListener('touchend', () => {

@@ -91,6 +91,7 @@ export function setup() {
     });
 
     window.addEventListener('mousemove', e => {
+        // TODO: should clip left/top too (e.g. if the canvas is in the middle of the screen)
         mouseX = clamp(e.pageX, 0, width);
         mouseY = clamp(e.pageY, 0, height);
     });
@@ -144,6 +145,7 @@ export function setup() {
     });
 
     canvas.addEventListener('touchmove', e => {
+        // TODO: should clip
         mouseX = e.touches[0]!.clientX;
         mouseY = e.touches[0]!.clientY;
     });

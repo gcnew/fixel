@@ -336,7 +336,7 @@ export function handleClickUI(ui: UI<unknown>[]): boolean {
     for (const o of ui) {
         switch (o.kind) {
             case 'auto-container': {
-                if (!isClickInside(o)) {
+                if (!isMouseActionInside(o, false)) {
                     break;
                 }
 
@@ -348,7 +348,7 @@ export function handleClickUI(ui: UI<unknown>[]): boolean {
             }
 
             case 'button': {
-                if (isClickInside(o)) {
+                if (isMouseActionInside(o, false)) {
                     o.onClick(o);
                     return true;
                 }
@@ -361,42 +361,43 @@ export function handleClickUI(ui: UI<unknown>[]): boolean {
     return false;
 }
 
-function isClickInside(o: UI<unknown>) {
+function isMouseActionInside(o: UI<unknown>, isWheel: boolean) {
     const ld = getOrCreateLayout(o);
 
-    return clickX! >= ld.x && clickX! <= ld.x + ld.w
-        && clickY! >= ld.y && clickY! <= ld.y + ld.h
+    const isWheelOrClickInside = isWheel
+        || (    clickX! >= ld.x && clickX! <= ld.x + ld.w
+             && clickY! >= ld.y && clickY! <= ld.y + ld.h);
+
+    return isWheelOrClickInside
         && mouseX >= ld.x && mouseX <= ld.x + ld.w
         && mouseY >= ld.y && mouseY <= ld.y + ld.h;
 }
 
-export function handleScrollUI(ui: UI<unknown>[], deltaX: number, deltaY: number): boolean {
+export function handleScrollUI(ui: UI<unknown>[], deltaX: number, deltaY: number, isWheel: boolean): boolean {
     for (const o of ui) {
         switch (o.kind) {
             case 'button':
                 break;
 
             case 'auto-container': {
-                const ld = getOrCreateLayout(o);
-
-                if (!(clickX! >= ld.x && clickX! <= ld.x + ld.w
-                    && clickY! >= ld.y && clickY! <= ld.y + ld.h)) {
+                if (!isMouseActionInside(o, isWheel)) {
                     break;
                 }
 
-                // first try children
-                if (handleScrollUI(o.children, deltaX, deltaY)) {
+                // try the children first
+                if (handleScrollUI(o.children, deltaX, deltaY, isWheel)) {
                     return true;
                 }
 
+                const ld = getOrCreateLayout(o);
                 if (!ld.scroll) {
                     break;
                 }
 
                 if (ld.scroll === 'x') {
-                    ld.scrollX = (ld.scrollX || 0) + deltaX;
+                    ld.scrollX = ld.scrollX + deltaX;
                 } else {
-                    ld.scrollY = (ld.scrollY || 0) + deltaY;
+                    ld.scrollY = ld.scrollY + deltaY;
                 }
 
                 return true;
