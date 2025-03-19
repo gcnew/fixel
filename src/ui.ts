@@ -28,7 +28,7 @@ export type AutoContainer<T> = {
     kind: 'auto-container',
     id: string,
     mode: 'column' | 'row',
-    children: Exclude<UI<T>, { kind: 'old-button' }>[],
+    children: UI<T>[],
     style: string | UIStyle | undefined,
 }
 
@@ -63,6 +63,8 @@ type LayoutData = {
     scroll: 'x' | 'y' | undefined,
     scrollX: number,
     scrollY: number,
+    scrollHeight: number,
+    scrollWidth: number,
 
     // Accessors
     maxWidth: number | undefined,
@@ -123,10 +125,71 @@ export function addAtlasesUI(atlases: typeof loadedAtlases) {
 }
 
 export function drawUI(ui: UI<unknown>[]) {
+    layout(ui);
+
     for (const o of ui) {
         switch (o.kind) {
             case 'button': drawButton(o); break;
             case 'auto-container': drawAutoContainer(o);
+        }
+    }
+}
+
+function layout(ui: UI<unknown>[]) {
+    for (const o of ui) {
+        switch (o.kind) {
+            case 'button': break;
+            case 'auto-container': layoutAutoContainer(o);
+        }
+    }
+}
+
+function layoutAutoContainer(o: AutoContainer<unknown>) {
+    const ld = getOrCreateLayout(o);
+
+    // first, layout its children to obtain accurate (w,h)
+    layout(o.children);
+
+    ld.scrollHeight = o.mode === 'row'
+        ? o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).h), 0)
+        : o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h + ld.gap, -ld.gap);
+    ld.scrollWidth = o.mode === 'row'
+        ? o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w + ld.gap, -ld.gap)
+        : o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).w), 0);
+
+    ld.scrollX = clamp(ld.scrollX, Math.min(ld.w, ld.scrollWidth) - ld.scrollWidth, 0);
+    ld.scrollY = clamp(ld.scrollY, Math.min(ld.h, ld.scrollHeight) - ld.scrollHeight, 0);
+
+    if (!ld.style.h) {
+        ld.h = ld.scrollHeight;
+    }
+
+    if (!ld.style.w) {
+        ld.w = ld.scrollWidth;
+    }
+
+    const maxHeight = ld.style?.maxHeight;
+    if (maxHeight) {
+        ld.h = Math.min(maxHeight, ld.scrollHeight);
+    }
+
+    const maxWidth = ld.style?.maxWidth;
+    if (maxWidth) {
+        ld.w = Math.min(maxWidth, ld.scrollWidth);
+    }
+
+    let dy = 0;
+    let dx = 0;
+    for (const c of o.children) {
+        const childLd = getOrCreateLayout(c);
+
+        childLd.x = ld.x + dx + ld.scrollX;
+        childLd.y = ld.y + dy + ld.scrollY;
+
+        if (o.mode === 'column') {
+            dy += childLd.h + ld.gap;
+        } else {
+            dx += childLd.w + ld.gap;
         }
     }
 }
@@ -213,68 +276,25 @@ function drawLine(x: number, y: number, w: number, h: number, strokeStyle: strin
 function drawAutoContainer(o: AutoContainer<unknown>) {
     const ld = getOrCreateLayout(o);
 
-    const totalHeight = o.mode === 'row'
-        ? o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).h), 0)
-        : o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h + ld.gap, -ld.gap);
-    const totalWidth = o.mode === 'row'
-        ? o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w + ld.gap, -ld.gap)
-        : o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).w), 0);
-
-    if (!ld.style.h) {
-        ld.h = totalHeight;
-    }
-
-    if (!ld.style.w) {
-        ld.w = totalWidth;
-    }
-
-    const maxHeight = ld.style?.maxHeight;
-    if (maxHeight) {
-        ld.h = Math.min(maxHeight, totalHeight);
-    }
-
-    const maxWidth = ld.style?.maxWidth;
-    if (maxWidth) {
-        ld.w = Math.min(maxWidth, totalWidth);
-    }
-
-    const clip = !!ld.scroll || totalHeight > ld.h || totalWidth > ld.w;
+    const clip = !!ld.scroll || ld.scrollHeight > ld.h || ld.scrollWidth > ld.w;
     if (clip) {
-        ld.scrollX = clamp(ld.scrollX, Math.min(ld.w, totalWidth) - totalWidth, 0);
-        ld.scrollY = clamp(ld.scrollY, Math.min(ld.h, totalHeight) - totalHeight, 0);
-
         ctx.save();
         ctx.beginPath();
         ctx.rect(ld.x - 0.5, ld.y - 0.5, ld.w + 0.5, ld.h + 0.5);
         ctx.clip();
     }
 
-    let dy = 0;
-    let dx = 0;
-
-    for (const c of o.children) {
-        const childLd = getOrCreateLayout(c);
-
-        childLd.x = ld.x + dx + ld.scrollX;
-        childLd.y = ld.y + dy + ld.scrollY;
-
-        if (o.mode === 'column') {
-            dy += childLd.h + ld.gap;
-        } else {
-            dx += childLd.w + ld.gap;
-        }
-    }
-
     drawUI(o.children);
     if (clip) {
         ctx.restore();
     }
+
     drawBorder(ld);
 
     if (displayBoundingBoxes) {
         ctx.strokeStyle = 'red';
         ctx.lineWidth = 1;
-        ctx.strokeRect(ld.x - 1, ld.y -1, ld.w + 1, ld.h + 1);
+        ctx.strokeRect(ld.x, ld.y, ld.w, ld.h);
     }
 }
 
@@ -318,6 +338,8 @@ function createLayoutData(style: UIStyle | undefined): LayoutData {
         scroll: style?.scroll,
         scrollX: 0,
         scrollY: 0,
+        scrollHeight: 0,
+        scrollWidth: 0,
 
         // Accessors
         get maxWidth()    { return style?.maxWidth    || defaultStyle.maxWidth;    },
