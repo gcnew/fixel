@@ -88,7 +88,7 @@ const history: Action[] = [];
 let curAtlas = 'img/grass.png';
 let currentTile: { x: number, y: number } | undefined;
 
-let ui: UI<any>[] = [];
+let ui: UI[] = [];
 
 const styleContext = {
     get height() {
@@ -396,7 +396,7 @@ function regenerateUI() {
 }
 
 function createToolsContainer() {
-    const container: AutoContainer<undefined> = {
+    const container: AutoContainer = {
         kind: 'auto-container',
         id: 'tools-container',
         mode: 'row',
@@ -484,7 +484,7 @@ const redoButton: Button<undefined> = {
     onClick: historyRedo
 };
 
-const smallTools: AutoContainer<undefined> = {
+const smallTools: AutoContainer = {
     kind: 'auto-container',
     id: 'small-tools-container',
     mode: 'column',
@@ -492,7 +492,7 @@ const smallTools: AutoContainer<undefined> = {
     style: { gap: 5 },
 };
 
-function createAtlasList(): AutoContainer<undefined> {
+function createAtlasList(): AutoContainer {
     const list = atlasPaths.map<Button<undefined>>(path => {
         const text = path
             .replace('img/', '')
@@ -512,7 +512,7 @@ function createAtlasList(): AutoContainer<undefined> {
         };
     });
 
-    const container: AutoContainer<undefined> = {
+    const container: AutoContainer = {
         kind: 'auto-container',
         id: 'atlas-list-container',
         mode: 'column',
@@ -530,7 +530,7 @@ function onAtlasButtonClick(x: Button<undefined>) {
     regenerateUI();
 }
 
-function createAtlasTiles(nRows: number): AutoContainer<{ x: number, y: number }> {
+function createAtlasTiles(nRows: number): AutoContainer {
 
     const atlas = loadedAtlases[curAtlas]!;
 
@@ -569,7 +569,7 @@ function createAtlasTiles(nRows: number): AutoContainer<{ x: number, y: number }
 
         currRow.push(btn);
         if (i % ac === ac - 1) {
-            const container: AutoContainer<{ x: number, y: number }> = {
+            const container: AutoContainer = {
                 kind: 'auto-container',
                 id: `tiles-row:${cols.length}:${rows.length}`,
                 mode: 'row',
@@ -582,7 +582,7 @@ function createAtlasTiles(nRows: number): AutoContainer<{ x: number, y: number }
         }
 
         if (rows.length === nRows || i === count - 1) {
-            const container: AutoContainer<{ x: number, y: number }> = {
+            const container: AutoContainer = {
                 kind: 'auto-container',
                 id: `tiles-col:${cols.length}`,
                 mode: 'column',
@@ -595,7 +595,7 @@ function createAtlasTiles(nRows: number): AutoContainer<{ x: number, y: number }
         }
     }
 
-    const container: AutoContainer<{ x: number, y: number }> = {
+    const container: AutoContainer = {
         kind: 'auto-container',
         id: 'tiles-container',
         mode: 'row',

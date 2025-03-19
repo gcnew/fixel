@@ -9,8 +9,8 @@ import { compileStyle } from './mini-css'
 import { clamp } from './util'
 
 
-export type UI<T> = Button<T>
-                  | AutoContainer<T>
+export type UI = Button<any>
+               | AutoContainer
 
 export type ImageSlice = { kind: 'image', src: string, dx: number, dy: number, w: number, h: number }
 export type TextProps  = { kind: 'text', text: string }
@@ -24,11 +24,11 @@ export type Button<T> = {
     onClick: (o: Button<T>) => void,
 }
 
-export type AutoContainer<T> = {
+export type AutoContainer = {
     kind: 'auto-container',
     id: string,
     mode: 'column' | 'row',
-    children: UI<T>[],
+    children: UI[],
     style: string | UIStyle | undefined,
 }
 
@@ -101,7 +101,7 @@ const defaultStyle: Required<UIStyle> = {
 };
 
 const styles: ReturnType<typeof compileStyle<UIStyle>> = {};
-const layoutDataCache: { [id: string]: { style: UI<unknown>['style'], layout: LayoutData } } = {};
+const layoutDataCache: { [id: string]: { style: UI['style'], layout: LayoutData } } = {};
 const loadedAtlases: { [k: string]: HTMLImageElement } = {};
 
 let displayBoundingBoxes = false;
@@ -124,7 +124,7 @@ export function addAtlasesUI(atlases: typeof loadedAtlases) {
     Object.defineProperties(loadedAtlases, Object.getOwnPropertyDescriptors(atlases));
 }
 
-export function drawUI(ui: UI<unknown>[]) {
+export function drawUI(ui: UI[]) {
     layout(ui);
 
     for (const o of ui) {
@@ -135,7 +135,7 @@ export function drawUI(ui: UI<unknown>[]) {
     }
 }
 
-function layout(ui: UI<unknown>[]) {
+function layout(ui: UI[]) {
     for (const o of ui) {
         switch (o.kind) {
             case 'button': break;
@@ -144,7 +144,7 @@ function layout(ui: UI<unknown>[]) {
     }
 }
 
-function layoutAutoContainer(o: AutoContainer<unknown>) {
+function layoutAutoContainer(o: AutoContainer) {
     const ld = getOrCreateLayout(o);
 
     // first, layout its children to obtain accurate (w,h)
@@ -273,7 +273,7 @@ function drawLine(x: number, y: number, w: number, h: number, strokeStyle: strin
     ctx.stroke();
 }
 
-function drawAutoContainer(o: AutoContainer<unknown>) {
+function drawAutoContainer(o: AutoContainer) {
     const ld = getOrCreateLayout(o);
 
     const clip = !!ld.scroll || ld.scrollHeight > ld.h || ld.scrollWidth > ld.w;
@@ -298,7 +298,7 @@ function drawAutoContainer(o: AutoContainer<unknown>) {
     }
 }
 
-function getOrCreateLayout(o: Button<unknown> | AutoContainer<unknown>): LayoutData {
+function getOrCreateLayout(o: UI): LayoutData {
     const existing = layoutDataCache[o.id];
     if (existing && existing.style === o.style) {
         return existing.layout;
@@ -354,7 +354,7 @@ function createLayoutData(style: UIStyle | undefined): LayoutData {
     return res;
 }
 
-export function handleClickUI(ui: UI<unknown>[]): boolean {
+export function handleClickUI(ui: UI[]): boolean {
     for (const o of ui) {
         switch (o.kind) {
             case 'auto-container': {
@@ -383,7 +383,7 @@ export function handleClickUI(ui: UI<unknown>[]): boolean {
     return false;
 }
 
-function isClickInside(o: UI<unknown>) {
+function isClickInside(o: UI) {
     const ld = getOrCreateLayout(o);
 
     // for a click to be valid, both the initial touch down and the current position need
@@ -394,7 +394,7 @@ function isClickInside(o: UI<unknown>) {
         && mouseY >= ld.y && mouseY <= ld.y + ld.h;
 }
 
-function isScrollInside(o: UI<unknown>, isWheel: boolean) {
+function isScrollInside(o: UI, isWheel: boolean) {
     const ld = getOrCreateLayout(o);
 
     if (isWheel) {
@@ -408,7 +408,7 @@ function isScrollInside(o: UI<unknown>, isWheel: boolean) {
         && clickY! >= ld.y && clickY! <= ld.y + ld.h;
 }
 
-export function handleScrollUI(ui: UI<unknown>[], deltaX: number, deltaY: number, isWheel: boolean): boolean {
+export function handleScrollUI(ui: UI[], deltaX: number, deltaY: number, isWheel: boolean): boolean {
     for (const o of ui) {
         switch (o.kind) {
             case 'button':
