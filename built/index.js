@@ -169,10 +169,6 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
         window.addEventListener('keydown', keydownListener);
         window.addEventListener('keyup', keyupListener);
         window.addEventListener('keydown', e => {
-            // skip repeats
-            if (e.repeat) {
-                return;
-            }
             // do nothing if the originating element is input unless the pressed key is ESC
             // in case of ESC, the element should lose focus
             if (e.target.tagName === 'INPUT') {
@@ -190,7 +186,10 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
             ]
                 .filter(util_1.isTruthy)
                 .join('+');
-            KbShortcuts.get(sigil)?.();
+            const handler = KbShortcuts.get(sigil);
+            if (handler && (!e.repeat || handler.repeat)) {
+                handler.fn();
+            }
         });
         window.addEventListener('mousemove', e => {
             // TODO: should clip left/top too (e.g. if the canvas is in the middle of the screen)
@@ -255,9 +254,9 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
     }
     exports.setGameObject = setGameObject;
     function registerShortcuts(shortcuts) {
-        for (const [fn, sc] of shortcuts) {
+        for (const [fn, sc, repeat] of shortcuts) {
             const fixed = (0, keyboard_1.normaliseShortcut)(sc);
-            KbShortcuts.set(fixed, fn);
+            KbShortcuts.set(fixed, { fn, repeat: repeat ?? false });
         }
     }
     exports.registerShortcuts = registerShortcuts;
@@ -544,6 +543,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
     }
     exports.addAtlasesUI = addAtlasesUI;
     function drawUI(ui) {
+        layout(ui);
         for (const o of ui) {
             switch (o.kind) {
                 case 'button':
@@ -554,6 +554,54 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         }
     }
     exports.drawUI = drawUI;
+    function layout(ui) {
+        for (const o of ui) {
+            switch (o.kind) {
+                case 'button': break;
+                case 'auto-container': layoutAutoContainer(o);
+            }
+        }
+    }
+    function layoutAutoContainer(o) {
+        const ld = getOrCreateLayout(o);
+        // first, layout its children to obtain accurate (w,h)
+        layout(o.children);
+        ld.scrollHeight = o.mode === 'row'
+            ? o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).h), 0)
+            : o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h + ld.gap, -ld.gap);
+        ld.scrollWidth = o.mode === 'row'
+            ? o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w + ld.gap, -ld.gap)
+            : o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).w), 0);
+        ld.scrollX = (0, util_2.clamp)(ld.scrollX, Math.min(ld.w, ld.scrollWidth) - ld.scrollWidth, 0);
+        ld.scrollY = (0, util_2.clamp)(ld.scrollY, Math.min(ld.h, ld.scrollHeight) - ld.scrollHeight, 0);
+        if (!ld.style.h) {
+            ld.h = ld.scrollHeight;
+        }
+        if (!ld.style.w) {
+            ld.w = ld.scrollWidth;
+        }
+        const maxHeight = ld.style?.maxHeight;
+        if (maxHeight) {
+            ld.h = Math.min(maxHeight, ld.scrollHeight);
+        }
+        const maxWidth = ld.style?.maxWidth;
+        if (maxWidth) {
+            ld.w = Math.min(maxWidth, ld.scrollWidth);
+        }
+        let dy = 0;
+        let dx = 0;
+        for (const c of o.children) {
+            const childLd = getOrCreateLayout(c);
+            childLd.x = ld.x + dx + ld.scrollX;
+            childLd.y = ld.y + dy + ld.scrollY;
+            if (o.mode === 'column') {
+                dy += childLd.h + ld.gap;
+            }
+            else {
+                dx += childLd.w + ld.gap;
+            }
+        }
+    }
     function drawButton(o) {
         const ld = getOrCreateLayout(o);
         if (o.inner.kind === 'text') {
@@ -617,47 +665,12 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
     }
     function drawAutoContainer(o) {
         const ld = getOrCreateLayout(o);
-        const totalHeight = o.mode === 'row'
-            ? o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).h), 0)
-            : o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h + ld.gap, -ld.gap);
-        const totalWidth = o.mode === 'row'
-            ? o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w + ld.gap, -ld.gap)
-            : o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).w), 0);
-        if (!ld.style.h) {
-            ld.h = totalHeight;
-        }
-        if (!ld.style.w) {
-            ld.w = totalWidth;
-        }
-        const maxHeight = ld.style?.maxHeight;
-        if (maxHeight) {
-            ld.h = Math.min(maxHeight, totalHeight);
-        }
-        const maxWidth = ld.style?.maxWidth;
-        if (maxWidth) {
-            ld.w = Math.min(maxWidth, totalWidth);
-        }
-        const clip = !!ld.scroll || totalHeight > ld.h || totalWidth > ld.w;
+        const clip = !!ld.scroll || ld.scrollHeight > ld.h || ld.scrollWidth > ld.w;
         if (clip) {
-            ld.scrollX = (0, util_2.clamp)(ld.scrollX, Math.min(ld.w, totalWidth) - totalWidth, 0);
-            ld.scrollY = (0, util_2.clamp)(ld.scrollY, Math.min(ld.h, totalHeight) - totalHeight, 0);
             engine_1.ctx.save();
             engine_1.ctx.beginPath();
             engine_1.ctx.rect(ld.x - 0.5, ld.y - 0.5, ld.w + 0.5, ld.h + 0.5);
             engine_1.ctx.clip();
-        }
-        let dy = 0;
-        let dx = 0;
-        for (const c of o.children) {
-            const childLd = getOrCreateLayout(c);
-            childLd.x = ld.x + dx + ld.scrollX;
-            childLd.y = ld.y + dy + ld.scrollY;
-            if (o.mode === 'column') {
-                dy += childLd.h + ld.gap;
-            }
-            else {
-                dx += childLd.w + ld.gap;
-            }
         }
         drawUI(o.children);
         if (clip) {
@@ -667,7 +680,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         if (displayBoundingBoxes) {
             engine_1.ctx.strokeStyle = 'red';
             engine_1.ctx.lineWidth = 1;
-            engine_1.ctx.strokeRect(ld.x - 1, ld.y - 1, ld.w + 1, ld.h + 1);
+            engine_1.ctx.strokeRect(ld.x, ld.y, ld.w, ld.h);
         }
     }
     function getOrCreateLayout(o) {
@@ -700,6 +713,8 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             scroll: style?.scroll,
             scrollX: 0,
             scrollY: 0,
+            scrollHeight: 0,
+            scrollWidth: 0,
             // Accessors
             get maxWidth() { return style?.maxWidth || defaultStyle.maxWidth; },
             get maxHeight() { return style?.maxHeight || defaultStyle.maxHeight; },
@@ -782,9 +797,9 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     const META_KEY = engine_2.isMac ? 'META' : 'CTRL';
     const KbShortcuts = [
         [onEscape, 'ESC'],
-        [historyUndo, `${META_KEY} + Z`],
-        [historyRedo, `${META_KEY} + SHIFT + Z`],
-        [historyRedo, `CTRL + Y`],
+        [historyUndo, `${META_KEY} + Z`, true],
+        [historyRedo, `${META_KEY} + SHIFT + Z`, true],
+        [historyRedo, `CTRL + Y`, true],
         [() => (0, ui_1.displayBoundingBoxes)(!(0, ui_1.displayBoundingBoxes)()), ']'],
     ];
     const atlasPaths = [
@@ -828,6 +843,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     const GridSizes = [16, 24, 32, 48, 64, 80, 96, 128];
     let tiles = [];
     let historyIndex = 0;
+    let massHistoryStart;
     const history = [];
     let curAtlas = 'img/grass.png';
     let currentTile;
@@ -952,7 +968,10 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         if (mouseDown && engine_2.clickY <= toolsOffset && engine_2.mouseY <= toolsOffset) {
             const { x, y } = toTileCoordinates(engine_2.mouseX, engine_2.mouseY);
             if (deleteMode) {
-                tiles = tiles.filter(t => t.x !== x || t.y !== y);
+                const toDelete = tiles.filter(t => t.x === x && t.y === y);
+                if (toDelete.length) {
+                    executeAction({ kind: 'delete-tiles', tiles: toDelete });
+                }
                 return;
             }
             if (!currentTile) {
@@ -966,8 +985,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                 && t.atlasY === currentTile.y);
             if (!existing) {
                 const tile = { x, y, atlasX: currentTile.x, atlasY: currentTile.y, atlas: curAtlas };
-                tiles.push(tile);
-                pushHistoryAction({ kind: 'add-tiles', tiles: [tile] });
+                executeAction({ kind: 'add-tiles', tiles: [tile] });
             }
         }
     }
@@ -1035,6 +1053,10 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     }
     function onMouseUp(e) {
         mouseDown = false;
+        if (massHistoryStart !== undefined) {
+            aggregateHistory(massHistoryStart, historyIndex);
+            massHistoryStart = undefined;
+        }
         if (e.button === 'secondary') {
             deleteMode = false;
         }
@@ -1044,6 +1066,11 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     }
     function onMouseDown(e) {
         mouseDown = true;
+        // can happen if the non-primary button is pressed
+        if (massHistoryStart !== undefined) {
+            aggregateHistory(massHistoryStart, historyIndex);
+        }
+        massHistoryStart = historyIndex;
         if (e.button === 'secondary') {
             deleteMode = true;
             e.preventDefault = true;
@@ -1306,34 +1333,67 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     function toTileCoordinates(x, y) {
         return { x: Math.floor(x / gridSize), y: Math.floor(y / gridSize) };
     }
-    function pushHistoryAction(action) {
+    function executeAction(action) {
         if (historyIndex !== history.length) {
             history.splice(historyIndex, history.length - historyIndex);
         }
         history.push(action);
         historyIndex = history.length;
+        applyAction(action);
     }
     function historyUndo() {
         if (historyIndex === 0) {
             return;
         }
         const action = history[--historyIndex];
-        switch (action.kind) {
-            case 'add-tiles': {
-                tiles = tiles.filter(x => !action.tiles.includes(x));
-            }
-        }
+        revertAction(action);
     }
     function historyRedo() {
         if (historyIndex === history.length) {
             return;
         }
         const action = history[historyIndex++];
+        applyAction(action);
+    }
+    function applyAction(action) {
         switch (action.kind) {
             case 'add-tiles': {
                 tiles.push(...action.tiles);
+                return;
+            }
+            case 'delete-tiles': {
+                tiles = tiles.filter(x => !action.tiles.includes(x));
+                return;
             }
         }
+    }
+    function revertAction(action) {
+        switch (action.kind) {
+            case 'add-tiles': {
+                tiles = tiles.filter(x => !action.tiles.includes(x));
+                return;
+            }
+            case 'delete-tiles': {
+                tiles.push(...action.tiles);
+                return;
+            }
+        }
+    }
+    function aggregateHistory(start, end) {
+        if (start === end) {
+            return;
+        }
+        const entries = history.slice(start, end);
+        // this should never happen under normal circumstances, however one can press CTRL + Z amidst drawing
+        if (!entries.length || entries.some((x, _, a) => x.kind !== a[0].kind)) {
+            return;
+        }
+        const aggregated = entries.reduce((acc, x) => {
+            acc.tiles.push(...x.tiles);
+            return acc;
+        });
+        history.splice(start, end - start, aggregated);
+        historyIndex = history.length;
     }
 });
 define("game", ["require", "exports", "engine"], function (require, exports, engine_3) {
