@@ -36,7 +36,7 @@ export let clickY: number | undefined;
 
 export const isMac = /Mac/.test(navigator.userAgent);
 
-let KbShortcuts: Map<string, () => void> = new Map();
+let KbShortcuts: Map<string, { fn: () => void, repeat: boolean }> = new Map();
 
 export type VEvent = { kind: 'mouseup',   clickX: number, clickY: number, button: 'primary' | 'secondary' }
                    | { kind: 'mousedown', clickX: number, clickY: number, button: 'primary' | 'secondary', preventDefault: boolean }
@@ -62,11 +62,6 @@ export function setup() {
     window.addEventListener('keydown', keydownListener);
     window.addEventListener('keyup',   keyupListener);
     window.addEventListener('keydown', e => {
-        // skip repeats
-        if (e.repeat) {
-            return;
-        }
-
         // do nothing if the originating element is input unless the pressed key is ESC
         // in case of ESC, the element should lose focus
         if ((e.target as HTMLElement).tagName === 'INPUT') {
@@ -87,7 +82,10 @@ export function setup() {
             .filter(isTruthy)
             .join('+');
 
-        KbShortcuts.get(sigil)?.();
+        const handler = KbShortcuts.get(sigil);
+        if (handler && (!e.repeat || handler.repeat)) {
+            handler.fn();
+        }
     });
 
     window.addEventListener('mousemove', e => {
@@ -165,9 +163,9 @@ export function setGameObject(newGame: GameObj) {
 }
 
 export function registerShortcuts(shortcuts: Shortcut[]) {
-    for (const [fn, sc] of shortcuts) {
+    for (const [fn, sc, repeat] of shortcuts) {
         const fixed = normaliseShortcut(sc);
-        KbShortcuts.set(fixed, fn);
+        KbShortcuts.set(fixed, { fn, repeat: repeat ?? false });
     }
 }
 

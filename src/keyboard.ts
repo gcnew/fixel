@@ -86,7 +86,7 @@ export const KeyMap = {
     Slash:        '/',
 } as const;
 
-export type Shortcut = [() => void, string]
+export type Shortcut = [fn: () => void, keys: string, repeat?: boolean]
 
 export function normaliseShortcut(sc: string) {
     const prio = [ 'META', 'CTRL', 'ALT', 'SHIFT' ];

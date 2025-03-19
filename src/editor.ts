@@ -17,16 +17,18 @@ import {
 } from './ui'
 
 
-type Action    = { kind: 'add-tiles', tiles: Tile[] }
-type Tile      = { x: number, y: number, atlasX: number, atlasY: number, atlas: string }
+type Action = { kind: 'add-tiles',    tiles: Tile[] }
+            | { kind: 'delete-tiles', tiles: Tile[] }
+
+type Tile = { x: number, y: number, atlasX: number, atlasY: number, atlas: string }
 
 const META_KEY = isMac ? 'META' : 'CTRL';
 
 const KbShortcuts: Shortcut[] = [
     [onEscape,    'ESC'],
-    [historyUndo, `${META_KEY} + Z`],
-    [historyRedo, `${META_KEY} + SHIFT + Z`],
-    [historyRedo, `CTRL + Y`],
+    [historyUndo, `${META_KEY} + Z`,          true],
+    [historyRedo, `${META_KEY} + SHIFT + Z`,  true],
+    [historyRedo, `CTRL + Y`,                 true],
 
     [() => displayBoundingBoxes(!displayBoundingBoxes()), ']'],
 ];
@@ -225,7 +227,12 @@ function beforeDraw() {
         const { x, y } = toTileCoordinates(mouseX, mouseY);
 
         if (deleteMode) {
-            tiles = tiles.filter(t => t.x !== x || t.y !== y);
+            const toDelete = tiles.filter(t => t.x === x && t.y === y);
+
+            if (toDelete.length) {
+                executeAction({ kind: 'delete-tiles', tiles: toDelete });
+            }
+
             return;
         }
 
@@ -241,8 +248,7 @@ function beforeDraw() {
                                          && t.atlasY === currentTile!.y);
         if (!existing) {
             const tile = { x, y, atlasX: currentTile.x, atlasY: currentTile.y, atlas: curAtlas };
-            tiles.push(tile);
-            pushHistoryAction({ kind: 'add-tiles', tiles: [tile] });
+            executeAction({ kind: 'add-tiles', tiles: [tile] });
         }
     }
 }
@@ -661,13 +667,15 @@ function toTileCoordinates(x: number, y: number) {
     return { x: Math.floor(x / gridSize), y: Math.floor(y / gridSize) };
 }
 
-function pushHistoryAction(action: Action) {
+function executeAction(action: Action) {
     if (historyIndex !== history.length) {
         history.splice(historyIndex, history.length - historyIndex)
     }
 
     history.push(action);
     historyIndex = history.length;
+
+    applyAction(action);
 }
 
 function historyUndo() {
@@ -676,11 +684,7 @@ function historyUndo() {
     }
 
     const action = history[--historyIndex]!;
-    switch (action.kind) {
-        case 'add-tiles': {
-            tiles = tiles.filter(x => !action.tiles.includes(x));
-        }
-    }
+    revertAction(action);
 }
 
 function historyRedo() {
@@ -689,9 +693,33 @@ function historyRedo() {
     }
 
     const action = history[historyIndex++]!;
+    applyAction(action);
+}
+
+function applyAction(action: Action) {
     switch (action.kind) {
         case 'add-tiles': {
             tiles.push(... action.tiles);
+            return;
+        }
+
+        case 'delete-tiles': {
+            tiles = tiles.filter(x => !action.tiles.includes(x));
+            return;
+        }
+    }
+}
+
+function revertAction(action: Action) {
+    switch (action.kind) {
+        case 'add-tiles': {
+            tiles = tiles.filter(x => !action.tiles.includes(x));
+            return;
+        }
+
+        case 'delete-tiles': {
+            tiles.push(... action.tiles);
+            return;
         }
     }
 }
