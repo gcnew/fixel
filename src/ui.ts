@@ -358,7 +358,7 @@ export function handleClickUI(ui: UI<unknown>[]): boolean {
     for (const o of ui) {
         switch (o.kind) {
             case 'auto-container': {
-                if (!isMouseActionInside(o, false)) {
+                if (!isClickInside(o)) {
                     break;
                 }
 
@@ -370,7 +370,7 @@ export function handleClickUI(ui: UI<unknown>[]): boolean {
             }
 
             case 'button': {
-                if (isMouseActionInside(o, false)) {
+                if (isClickInside(o)) {
                     o.onClick(o);
                     return true;
                 }
@@ -383,16 +383,29 @@ export function handleClickUI(ui: UI<unknown>[]): boolean {
     return false;
 }
 
-function isMouseActionInside(o: UI<unknown>, isWheel: boolean) {
+function isClickInside(o: UI<unknown>) {
     const ld = getOrCreateLayout(o);
 
-    const isWheelOrClickInside = isWheel
-        || (    clickX! >= ld.x && clickX! <= ld.x + ld.w
-             && clickY! >= ld.y && clickY! <= ld.y + ld.h);
-
-    return isWheelOrClickInside
+    // for a click to be valid, both the initial touch down and the current position need
+    // to be inside the element
+    return clickX! >= ld.x && clickX! <= ld.x + ld.w
+        && clickY! >= ld.y && clickY! <= ld.y + ld.h
         && mouseX >= ld.x && mouseX <= ld.x + ld.w
         && mouseY >= ld.y && mouseY <= ld.y + ld.h;
+}
+
+function isScrollInside(o: UI<unknown>, isWheel: boolean) {
+    const ld = getOrCreateLayout(o);
+
+    if (isWheel) {
+        return mouseX >= ld.x && mouseX <= ld.x + ld.w
+            && mouseY >= ld.y && mouseY <= ld.y + ld.h;
+    }
+
+    // touch devices: scroll should work for the element where the tap was initiated
+    // even if the current position of the pointer is outside the scrolled element
+    return clickX! >= ld.x && clickX! <= ld.x + ld.w
+        && clickY! >= ld.y && clickY! <= ld.y + ld.h;
 }
 
 export function handleScrollUI(ui: UI<unknown>[], deltaX: number, deltaY: number, isWheel: boolean): boolean {
@@ -402,7 +415,7 @@ export function handleScrollUI(ui: UI<unknown>[], deltaX: number, deltaY: number
                 break;
 
             case 'auto-container': {
-                if (!isMouseActionInside(o, isWheel)) {
+                if (!isScrollInside(o, isWheel)) {
                     break;
                 }
 
