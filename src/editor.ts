@@ -82,6 +82,7 @@ const GridSizes = [ 16, 24, 32, 48, 64, 80, 96, 128 ];
 let tiles: Tile[] = [];
 
 let historyIndex = 0;
+let massHistoryStart: number | undefined;
 const history: Action[] = [];
 
 let curAtlas = 'img/grass.png';
@@ -336,6 +337,10 @@ function onEscape() {
 
 function onMouseUp(e: Extract<VEvent, { kind: 'mouseup' }>) {
     mouseDown = false;
+    if (massHistoryStart !== undefined) {
+        aggregateHistory(massHistoryStart, historyIndex);
+        massHistoryStart = undefined;
+    }
 
     if (e.button === 'secondary') {
         deleteMode = false;
@@ -348,6 +353,13 @@ function onMouseUp(e: Extract<VEvent, { kind: 'mouseup' }>) {
 
 function onMouseDown(e: Extract<VEvent, { kind: 'mousedown' }>) {
     mouseDown = true;
+
+    // can happen if the non-primary button is pressed
+    if (massHistoryStart !== undefined) {
+        aggregateHistory(massHistoryStart, historyIndex);
+    }
+
+    massHistoryStart = historyIndex;
 
     if (e.button === 'secondary') {
         deleteMode = true;
@@ -722,4 +734,25 @@ function revertAction(action: Action) {
             return;
         }
     }
+}
+
+function aggregateHistory(start: number, end: number) {
+    if (start === end) {
+        return;
+    }
+
+    const entries = history.slice(start, end);
+
+    // this should never happen under normal circumstances, however one can press CTRL + Z amidst drawing
+    if (!entries.length || entries.some((x, _, a) => x.kind !== a[0]!.kind)) {
+        return;
+    }
+
+    const aggregated = entries.reduce((acc, x) => {
+        acc.tiles.push(... x.tiles);
+        return acc;
+    });
+
+    history.splice(start, end - start, aggregated);
+    historyIndex = history.length;
 }
