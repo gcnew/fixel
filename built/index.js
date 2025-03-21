@@ -121,7 +121,7 @@ define("keyboard", ["require", "exports"], function (require, exports) {
 define("util", ["require", "exports"], function (require, exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.onlyKey = exports.uuid = exports.clamp = exports.isTruthy = void 0;
+    exports.assertNever = exports.onlyKey = exports.uuid = exports.clamp = exports.isTruthy = void 0;
     function isTruthy(x) {
         return !!x;
     }
@@ -139,6 +139,10 @@ define("util", ["require", "exports"], function (require, exports) {
         return keys.length === 1 ? keys[0] : undefined;
     }
     exports.onlyKey = onlyKey;
+    function assertNever(x) {
+        throw new Error(`Not a never ${JSON.stringify(x)}`);
+    }
+    exports.assertNever = assertNever;
 });
 define("engine", ["require", "exports", "keyboard", "util"], function (require, exports, keyboard_1, util_1) {
     "use strict";
@@ -517,6 +521,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         maxHeight: undefined,
         color: 'aqua',
         font: '12px monospace',
+        textAlign: 'left',
         borderW: 0,
         borderColor: 'aqua',
         gap: 0,
@@ -542,35 +547,82 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         Object.defineProperties(loadedAtlases, Object.getOwnPropertyDescriptors(atlases));
     }
     exports.addAtlasesUI = addAtlasesUI;
-    function drawUI(ui) {
+    function layoutDraw(ui) {
+        const baseline = engine_1.ctx.textBaseline;
+        engine_1.ctx.textBaseline = 'top';
+        calcBoxes(ui);
         layout(ui);
+        drawUI(ui);
+        engine_1.ctx.textBaseline = baseline;
+    }
+    exports.drawUI = layoutDraw;
+    function drawUI(ui) {
         for (const o of ui) {
             switch (o.kind) {
+                case 'text':
+                    drawText(o);
+                    break;
                 case 'button':
                     drawButton(o);
                     break;
-                case 'auto-container': drawAutoContainer(o);
+                case 'auto-container':
+                    drawAutoContainer(o);
+                    break;
+                default: (0, util_2.assertNever)(o);
             }
         }
     }
-    exports.drawUI = drawUI;
-    function layout(ui) {
+    function calcBoxes(ui) {
         for (const o of ui) {
             switch (o.kind) {
                 case 'button': break;
-                case 'auto-container': layoutAutoContainer(o);
+                case 'text':
+                    calcBoxText(o);
+                    break;
+                case 'auto-container':
+                    calcBoxAutoContainer(o);
+                    break;
+                default: (0, util_2.assertNever)(o);
             }
         }
     }
-    function layoutAutoContainer(o) {
+    function layout(ui) {
+        for (const o of ui) {
+            switch (o.kind) {
+                case 'button':
+                case 'text': break;
+                case 'auto-container':
+                    layoutAutoContainer(o);
+                    break;
+                default: (0, util_2.assertNever)(o);
+            }
+        }
+    }
+    function calcBoxText(o) {
+        const ld = getOrCreateLayout(o);
+        engine_1.ctx.font = ld.font;
+        const dims = engine_1.ctx.measureText(o.text);
+        if (ld.style.w === undefined) {
+            ld.w = dims.width;
+        }
+        if (ld.style.h === undefined) {
+            ld.h = dims.actualBoundingBoxDescent;
+        }
+        if (!displayBoundingBoxes) {
+            engine_1.ctx.strokeStyle = 'red';
+            engine_1.ctx.lineWidth = 1;
+            engine_1.ctx.strokeRect(ld.x, ld.y, ld.w, ld.h);
+        }
+    }
+    function calcBoxAutoContainer(o) {
         const ld = getOrCreateLayout(o);
         // first, layout its children to obtain accurate (w,h)
-        layout(o.children);
+        calcBoxes(o.children);
         ld.scrollHeight = o.mode === 'row'
             ? o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).h), 0)
-            : o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h + ld.gap, -ld.gap);
+            : o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h + ld.gap, 0) + (o.children.length > 0 ? -ld.gap : 0);
         ld.scrollWidth = o.mode === 'row'
-            ? o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w + ld.gap, -ld.gap)
+            ? o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w + ld.gap, 0) + (o.children.length > 0 ? -ld.gap : 0)
             : o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).w), 0);
         ld.scrollX = (0, util_2.clamp)(ld.scrollX, Math.min(ld.w, ld.scrollWidth) - ld.scrollWidth, 0);
         ld.scrollY = (0, util_2.clamp)(ld.scrollY, Math.min(ld.h, ld.scrollHeight) - ld.scrollHeight, 0);
@@ -588,6 +640,9 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         if (maxWidth) {
             ld.w = Math.min(maxWidth, ld.scrollWidth);
         }
+    }
+    function layoutAutoContainer(o) {
+        const ld = getOrCreateLayout(o);
         let dy = 0;
         let dx = 0;
         for (const c of o.children) {
@@ -601,6 +656,19 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                 dx += childLd.w + ld.gap;
             }
         }
+        layout(o.children);
+    }
+    function drawText(o) {
+        const ld = getOrCreateLayout(o);
+        engine_1.ctx.textBaseline = 'top';
+        engine_1.ctx.fillStyle = ld.color;
+        engine_1.ctx.font = ld.font;
+        engine_1.ctx.fillText(o.text, ld.x, ld.y);
+        if (!displayBoundingBoxes) {
+            engine_1.ctx.strokeStyle = 'red';
+            engine_1.ctx.lineWidth = 1;
+            engine_1.ctx.strokeRect(ld.x, ld.y, ld.w, ld.h);
+        }
     }
     function drawButton(o) {
         const ld = getOrCreateLayout(o);
@@ -608,9 +676,28 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             engine_1.ctx.fillStyle = ld.color;
             engine_1.ctx.font = ld.font;
             const dims = engine_1.ctx.measureText(o.inner.text);
-            const ch = Math.round((ld.h - dims.actualBoundingBoxAscent) / 2);
-            const wOffset = Math.max(ld.w - dims.width - 4 | 0, 5);
-            engine_1.ctx.fillText(o.inner.text, ld.x + wOffset, ld.y + dims.actualBoundingBoxAscent + ch | 0, ld.w - 9);
+            const ch = (ld.h - dims.actualBoundingBoxDescent) / 2 | 0;
+            let wOffset;
+            switch (ld.textAlign) {
+                case 'left': {
+                    wOffset = 5;
+                    break;
+                }
+                case 'right': {
+                    wOffset = Math.max(ld.w - dims.width - 4 | 0, 5);
+                    break;
+                }
+                case 'center': {
+                    wOffset = (ld.w - dims.width) / 2 | 0;
+                    break;
+                }
+            }
+            engine_1.ctx.fillText(o.inner.text, ld.x + wOffset, ld.y + ch, ld.w - 9);
+            if (displayBoundingBoxes) {
+                engine_1.ctx.strokeStyle = 'red';
+                engine_1.ctx.lineWidth = 1;
+                engine_1.ctx.strokeRect(ld.x + ld.w - dims.width - 4, ld.y, dims.width, dims.fontBoundingBoxDescent);
+            }
         }
         if (o.inner.kind === 'image') {
             const atlas = loadedAtlases[o.inner.src];
@@ -650,6 +737,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                 drawLine(ld.x, ld.y, 0, ld.h, strokeStyle, parsed[3]);
                 return;
             }
+            default: (0, util_2.assertNever)(borderW);
         }
     }
     function drawLine(x, y, w, h, strokeStyle, lineWidth) {
@@ -720,6 +808,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             get maxHeight() { return style?.maxHeight || defaultStyle.maxHeight; },
             get color() { return style?.color || defaultStyle.color; },
             get font() { return style?.font || defaultStyle.font; },
+            get textAlign() { return style?.textAlign || defaultStyle.textAlign; },
             get borderW() { return style?.borderW || defaultStyle.borderW; },
             get borderColor() { return style?.borderColor || defaultStyle.borderColor; },
             get gap() { return style?.gap || defaultStyle.gap; },
@@ -729,8 +818,10 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
     function handleClickUI(ui) {
         for (const o of ui) {
             switch (o.kind) {
+                case 'text':
+                    break;
                 case 'auto-container': {
-                    if (!isMouseActionInside(o, false)) {
+                    if (!isClickInside(o)) {
                         break;
                     }
                     if (handleClickUI(o.children)) {
@@ -739,33 +830,46 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                     break;
                 }
                 case 'button': {
-                    if (isMouseActionInside(o, false)) {
+                    if (isClickInside(o)) {
                         o.onClick(o);
                         return true;
                     }
                     break;
                 }
+                default: (0, util_2.assertNever)(o);
             }
         }
         return false;
     }
     exports.handleClickUI = handleClickUI;
-    function isMouseActionInside(o, isWheel) {
+    function isClickInside(o) {
         const ld = getOrCreateLayout(o);
-        const isWheelOrClickInside = isWheel
-            || (engine_1.clickX >= ld.x && engine_1.clickX <= ld.x + ld.w
-                && engine_1.clickY >= ld.y && engine_1.clickY <= ld.y + ld.h);
-        return isWheelOrClickInside
+        // for a click to be valid, both the initial touch down and the current position need
+        // to be inside the element
+        return engine_1.clickX >= ld.x && engine_1.clickX <= ld.x + ld.w
+            && engine_1.clickY >= ld.y && engine_1.clickY <= ld.y + ld.h
             && engine_1.mouseX >= ld.x && engine_1.mouseX <= ld.x + ld.w
             && engine_1.mouseY >= ld.y && engine_1.mouseY <= ld.y + ld.h;
+    }
+    function isScrollInside(o, isWheel) {
+        const ld = getOrCreateLayout(o);
+        if (isWheel) {
+            return engine_1.mouseX >= ld.x && engine_1.mouseX <= ld.x + ld.w
+                && engine_1.mouseY >= ld.y && engine_1.mouseY <= ld.y + ld.h;
+        }
+        // touch devices: scroll should work for the element where the tap was initiated
+        // even if the current position of the pointer is outside the scrolled element
+        return engine_1.clickX >= ld.x && engine_1.clickX <= ld.x + ld.w
+            && engine_1.clickY >= ld.y && engine_1.clickY <= ld.y + ld.h;
     }
     function handleScrollUI(ui, deltaX, deltaY, isWheel) {
         for (const o of ui) {
             switch (o.kind) {
+                case 'text':
                 case 'button':
                     break;
                 case 'auto-container': {
-                    if (!isMouseActionInside(o, isWheel)) {
+                    if (!isScrollInside(o, isWheel)) {
                         break;
                     }
                     // try the children first
@@ -777,13 +881,14 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                         break;
                     }
                     if (ld.scroll === 'x') {
-                        ld.scrollX = ld.scrollX + deltaX;
+                        ld.scrollX = ld.scrollX - deltaX;
                     }
                     else {
-                        ld.scrollY = ld.scrollY + deltaY;
+                        ld.scrollY = ld.scrollY - deltaY;
                     }
                     return true;
                 }
+                default: (0, util_2.assertNever)(o);
             }
         }
         return false;
@@ -805,16 +910,16 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     const atlasPaths = [
         'img/chest.png',
         'img/chicken-house.png',
+        'img/dirt.png',
+        'img/dirt-wide.png',
         'img/dirt-v2.png',
         'img/dirt-wide-v2.png',
-        'img/dirt-wide.png',
-        'img/dirt.png',
         'img/doors.png',
         'img/egg.png',
         'img/fences.png',
         'img/furniture.png',
-        'img/grass-biom-things.png',
         'img/grass.png',
+        'img/grass-biom-things.png',
         'img/hills.png',
         'img/house-roof.png',
         'img/house-walls.png',
@@ -894,14 +999,6 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         gap: 5;
     }
 
-    #atlas-list-container {
-        maxHeight: height - toolsOffset - 10 - (smallScreen ? 4 : 3);
-
-        borderW: 1;
-        borderColor: 'darkgray';
-        scroll: 'y';
-    }
-
     .small-button {
         w: smallScreen ? 30 : 45;
         h: smallScreen ? 14 : 21;
@@ -909,11 +1006,20 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         font: smallScreen ? '9px monospace' : '14px monospace';
         borderW: 1;
         borderColor: 'darkgray';
+        textAlign: 'center';
     }
 
     .small-button-active {
         ... .small-button;
         color: 'floralwhite';
+    }
+
+    #atlas-list-container {
+        maxHeight: height - toolsOffset - 10 - (smallScreen ? 4 : 3);
+
+        borderW: 1;
+        borderColor: 'darkgray';
+        scroll: 'y';
     }
 
     .atlas-list-button {
@@ -923,6 +1029,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         borderColor: 'darkgray';
         font: smallScreen ? '9px monospace' : '14px monospace';
         color: 'darkgray';
+        textAlign: 'right';
     }
 
     .atlas-list-button-active {
@@ -940,7 +1047,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         (0, ui_1.addStylesUI)(styleContext, styles);
         loadAtlases();
         onResize();
-        gridSize = smallScreen ? 24 : 64;
+        gridSize = smallScreen ? 32 : 64;
     }
     exports.setup = setup;
     function tearDown() {
@@ -960,8 +1067,8 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         engine_2.ctx.fillStyle = '#000';
         engine_2.ctx.fillRect(0, 0, engine_2.width, engine_2.height);
         beforeDraw();
-        (0, ui_1.drawUI)(ui);
         drawMainView();
+        (0, ui_1.drawUI)(ui);
     }
     exports.draw = draw;
     function beforeDraw() {
@@ -1261,7 +1368,9 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                     id: `tiles-col:${cols.length}`,
                     mode: 'column',
                     children: rows,
-                    style: { gap: 5 },
+                    style: {
+                        gap: 5
+                    },
                 };
                 cols.push(container);
                 rows = [];
@@ -1365,6 +1474,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                 tiles = tiles.filter(x => !action.tiles.includes(x));
                 return;
             }
+            default: (0, util_3.assertNever)(action);
         }
     }
     function revertAction(action) {
@@ -1377,6 +1487,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                 tiles.push(...action.tiles);
                 return;
             }
+            default: (0, util_3.assertNever)(action);
         }
     }
     function aggregateHistory(start, end) {
