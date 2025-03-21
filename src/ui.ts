@@ -6,11 +6,12 @@ import {
 
 import { compileStyle } from './mini-css'
 
-import { clamp } from './util'
+import { clamp, assertNever } from './util'
 
 
 export type UI = Button<any>
                | AutoContainer
+               | UIText
 
 export type ImageSlice = { kind: 'image', src: string, dx: number, dy: number, w: number, h: number }
 export type TextProps  = { kind: 'text', text: string }
@@ -32,6 +33,13 @@ export type AutoContainer = {
     style: string | UIStyle | undefined,
 }
 
+export type UIText = {
+    kind: 'text',
+    id: string,
+    text: string,
+    style: string | UIStyle | undefined,
+}
+
 export type UIStyle = {
     x?: number,
     y?: number,
@@ -44,6 +52,7 @@ export type UIStyle = {
 
     color?: string,
     font?: string,
+    textAlign?: 'left' | 'right' | 'center',
     borderW?: number | string,
     borderColor?: string,
 
@@ -72,6 +81,7 @@ type LayoutData = {
 
     color: string,
     font: string,
+    textAlign: 'left' | 'right' | 'center',
     borderW: number | string,
     borderColor: string,
     gap: number,
@@ -94,6 +104,7 @@ const defaultStyle: Required<UIStyle> = {
     maxHeight: undefined,
     color: 'aqua',
     font: '12px monospace',
+    textAlign: 'left',
     borderW: 0,
     borderColor: 'aqua',
     gap: 0,
@@ -124,13 +135,38 @@ export function addAtlasesUI(atlases: typeof loadedAtlases) {
     Object.defineProperties(loadedAtlases, Object.getOwnPropertyDescriptors(atlases));
 }
 
-export function drawUI(ui: UI[]) {
-    layout(ui);
+export { layoutDraw as drawUI }
+function layoutDraw(ui: UI[]) {
+    const baseline = ctx.textBaseline;
+    ctx.textBaseline = 'top';
 
+    calcBoxes(ui);
+    layout(ui);
+    drawUI(ui);
+
+    ctx.textBaseline = baseline;
+}
+
+function drawUI(ui: UI[]) {
     for (const o of ui) {
         switch (o.kind) {
+            case 'text': drawText(o); break;
             case 'button': drawButton(o); break;
-            case 'auto-container': drawAutoContainer(o);
+            case 'auto-container': drawAutoContainer(o); break;
+
+            default: assertNever(o);
+        }
+    }
+}
+
+function calcBoxes(ui: UI[]) {
+    for (const o of ui) {
+        switch (o.kind) {
+            case 'button':         break;
+            case 'text':           calcBoxText(o); break;
+            case 'auto-container': calcBoxAutoContainer(o); break;
+
+            default: assertNever(o);
         }
     }
 }
@@ -138,23 +174,46 @@ export function drawUI(ui: UI[]) {
 function layout(ui: UI[]) {
     for (const o of ui) {
         switch (o.kind) {
-            case 'button': break;
-            case 'auto-container': layoutAutoContainer(o);
+            case 'button':
+            case 'text':           break;
+            case 'auto-container': layoutAutoContainer(o); break;
+
+            default: assertNever(o);
         }
     }
 }
 
-function layoutAutoContainer(o: AutoContainer) {
+function calcBoxText(o: UIText) {
+    const ld = getOrCreateLayout(o);
+
+    ctx.font = ld.font;
+    const dims = ctx.measureText(o.text);
+
+    if (ld.style.w === undefined) {
+        ld.w = dims.width;
+    }
+    if (ld.style.h === undefined) {
+        ld.h = dims.actualBoundingBoxDescent;
+    }
+
+    if (!displayBoundingBoxes) {
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(ld.x, ld.y, ld.w, ld.h);
+    }
+}
+
+function calcBoxAutoContainer(o: AutoContainer) {
     const ld = getOrCreateLayout(o);
 
     // first, layout its children to obtain accurate (w,h)
-    layout(o.children);
+    calcBoxes(o.children);
 
     ld.scrollHeight = o.mode === 'row'
         ? o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).h), 0)
-        : o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h + ld.gap, -ld.gap);
+        : o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h + ld.gap, 0) + (o.children.length > 0 ? -ld.gap : 0);
     ld.scrollWidth = o.mode === 'row'
-        ? o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w + ld.gap, -ld.gap)
+        ? o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w + ld.gap, 0) + (o.children.length > 0 ? -ld.gap : 0)
         : o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).w), 0);
 
     ld.scrollX = clamp(ld.scrollX, Math.min(ld.w, ld.scrollWidth) - ld.scrollWidth, 0);
@@ -177,6 +236,10 @@ function layoutAutoContainer(o: AutoContainer) {
     if (maxWidth) {
         ld.w = Math.min(maxWidth, ld.scrollWidth);
     }
+}
+
+function layoutAutoContainer(o: AutoContainer) {
+    const ld = getOrCreateLayout(o);
 
     let dy = 0;
     let dx = 0;
@@ -192,6 +255,24 @@ function layoutAutoContainer(o: AutoContainer) {
             dx += childLd.w + ld.gap;
         }
     }
+
+    layout(o.children);
+}
+
+function drawText(o: UIText) {
+    const ld = getOrCreateLayout(o);
+    ctx.textBaseline = 'top';
+
+    ctx.fillStyle = ld.color;
+    ctx.font = ld.font;
+
+    ctx.fillText(o.text, ld.x, ld.y);
+
+    if (!displayBoundingBoxes) {
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(ld.x, ld.y, ld.w, ld.h);
+    }
 }
 
 function drawButton(o: Button<unknown>) {
@@ -202,10 +283,31 @@ function drawButton(o: Button<unknown>) {
         ctx.font = ld.font;
 
         const dims = ctx.measureText(o.inner.text);
-        const ch = Math.round((ld.h - dims.actualBoundingBoxAscent) / 2);
-        const wOffset = Math.max(ld.w - dims.width - 4 | 0, 5);
+        const ch = (ld.h - dims.actualBoundingBoxDescent) / 2 | 0;
 
-        ctx.fillText(o.inner.text, ld.x + wOffset, ld.y + dims.actualBoundingBoxAscent + ch | 0, ld.w - 9);
+        let wOffset;
+        switch (ld.textAlign) {
+            case 'left': {
+                wOffset = 5;
+                break;
+            }
+            case 'right': {
+                wOffset = Math.max(ld.w - dims.width - 4 | 0, 5);
+                break;
+            }
+            case 'center': {
+                wOffset = (ld.w - dims.width) / 2 | 0;
+                break;
+            }
+        }
+
+        ctx.fillText(o.inner.text, ld.x + wOffset, ld.y + ch, ld.w - 9);
+
+        if (displayBoundingBoxes) {
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(ld.x + ld.w - dims.width - 4, ld.y, dims.width, dims.fontBoundingBoxDescent);
+        }
     }
 
     if (o.inner.kind === 'image') {
@@ -257,6 +359,8 @@ function drawBorder(ld: LayoutData) {
             drawLine(ld.x, ld.y, 0, ld.h, strokeStyle, parsed[3]!);
             return;
         }
+
+        default: assertNever(borderW);
     }
 }
 
@@ -346,6 +450,7 @@ function createLayoutData(style: UIStyle | undefined): LayoutData {
         get maxHeight()   { return style?.maxHeight   || defaultStyle.maxHeight;   },
         get color()       { return style?.color       || defaultStyle.color;       },
         get font()        { return style?.font        || defaultStyle.font;        },
+        get textAlign()   { return style?.textAlign   || defaultStyle.textAlign;   },
         get borderW()     { return style?.borderW     || defaultStyle.borderW;     },
         get borderColor() { return style?.borderColor || defaultStyle.borderColor; },
         get gap()         { return style?.gap         || defaultStyle.gap;         },
@@ -357,6 +462,9 @@ function createLayoutData(style: UIStyle | undefined): LayoutData {
 export function handleClickUI(ui: UI[]): boolean {
     for (const o of ui) {
         switch (o.kind) {
+            case 'text':
+                break;
+
             case 'auto-container': {
                 if (!isClickInside(o)) {
                     break;
@@ -377,6 +485,8 @@ export function handleClickUI(ui: UI[]): boolean {
 
                 break;
             }
+
+            default: assertNever(o);
         }
     }
 
@@ -411,6 +521,7 @@ function isScrollInside(o: UI, isWheel: boolean) {
 export function handleScrollUI(ui: UI[], deltaX: number, deltaY: number, isWheel: boolean): boolean {
     for (const o of ui) {
         switch (o.kind) {
+            case 'text':
             case 'button':
                 break;
 
@@ -430,13 +541,15 @@ export function handleScrollUI(ui: UI[], deltaX: number, deltaY: number, isWheel
                 }
 
                 if (ld.scroll === 'x') {
-                    ld.scrollX = ld.scrollX + deltaX;
+                    ld.scrollX = ld.scrollX - deltaX;
                 } else {
-                    ld.scrollY = ld.scrollY + deltaY;
+                    ld.scrollY = ld.scrollY - deltaY;
                 }
 
                 return true;
             }
+
+            default: assertNever(o);
         }
     }
 

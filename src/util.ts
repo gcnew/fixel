@@ -17,3 +17,7 @@ export function onlyKey(x: { [k: string]: unknown }) {
     const keys = Object.keys(x);
     return keys.length === 1 ? keys[0] : undefined;
 }
+
+export function assertNever(x: never) {
+    throw new Error(`Not a never ${JSON.stringify(x)}`);
+}

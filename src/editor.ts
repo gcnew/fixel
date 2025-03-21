@@ -8,7 +8,7 @@ import {
     listen, unlisten, registerShortcuts, removeShortcuts,
 } from './engine'
 
-import { clamp } from './util'
+import { clamp, assertNever } from './util'
 import type { Shortcut } from './keyboard'
 import {
     UI, Button, AutoContainer,
@@ -36,16 +36,16 @@ const KbShortcuts: Shortcut[] = [
 const atlasPaths = [
     'img/chest.png',
     'img/chicken-house.png',
+    'img/dirt.png',
+    'img/dirt-wide.png',
     'img/dirt-v2.png',
     'img/dirt-wide-v2.png',
-    'img/dirt-wide.png',
-    'img/dirt.png',
     'img/doors.png',
     'img/egg.png',
     'img/fences.png',
     'img/furniture.png',
-    'img/grass-biom-things.png',
     'img/grass.png',
+    'img/grass-biom-things.png',
     'img/hills.png',
     'img/house-roof.png',
     'img/house-walls.png',
@@ -141,14 +141,6 @@ const styles = `
         gap: 5;
     }
 
-    #atlas-list-container {
-        maxHeight: height - toolsOffset - 10 - (smallScreen ? 4 : 3);
-
-        borderW: 1;
-        borderColor: 'darkgray';
-        scroll: 'y';
-    }
-
     .small-button {
         w: smallScreen ? 30 : 45;
         h: smallScreen ? 14 : 21;
@@ -156,11 +148,20 @@ const styles = `
         font: smallScreen ? '9px monospace' : '14px monospace';
         borderW: 1;
         borderColor: 'darkgray';
+        textAlign: 'center';
     }
 
     .small-button-active {
         ... .small-button;
         color: 'floralwhite';
+    }
+
+    #atlas-list-container {
+        maxHeight: height - toolsOffset - 10 - (smallScreen ? 4 : 3);
+
+        borderW: 1;
+        borderColor: 'darkgray';
+        scroll: 'y';
     }
 
     .atlas-list-button {
@@ -170,6 +171,7 @@ const styles = `
         borderColor: 'darkgray';
         font: smallScreen ? '9px monospace' : '14px monospace';
         color: 'darkgray';
+        textAlign: 'right';
     }
 
     .atlas-list-button-active {
@@ -193,7 +195,7 @@ export function setup() {
     loadAtlases();
     onResize();
 
-    gridSize = smallScreen ? 24 : 64;
+    gridSize = smallScreen ? 32 : 64;
 }
 
 export function tearDown() {
@@ -219,8 +221,8 @@ export function draw() {
 
     beforeDraw();
 
-    drawUI(ui);
     drawMainView();
+    drawUI(ui);
 }
 
 function beforeDraw() {
@@ -587,7 +589,9 @@ function createAtlasTiles(nRows: number): AutoContainer {
                 id: `tiles-col:${cols.length}`,
                 mode: 'column',
                 children: rows,
-                style: { gap: 5 },
+                style: {
+                    gap: 5
+                },
             };
 
             cols.push(container);
@@ -719,6 +723,8 @@ function applyAction(action: Action) {
             tiles = tiles.filter(x => !action.tiles.includes(x));
             return;
         }
+
+        default: assertNever(action);
     }
 }
 
@@ -733,6 +739,8 @@ function revertAction(action: Action) {
             tiles.push(... action.tiles);
             return;
         }
+
+        default: assertNever(action);
     }
 }
 
