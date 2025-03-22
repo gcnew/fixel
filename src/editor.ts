@@ -74,8 +74,11 @@ let sliceSize = 16;
 let toolsOffset: number;
 let smallScreen: boolean;
 
+let settingsToolSize: number | undefined;
+
 let mouseDown = false;
 let deleteMode = false;
+let settingsOpen = false;
 
 const GridSizes = [ 16, 24, 32, 48, 64, 80, 96, 128 ];
 
@@ -154,6 +157,7 @@ const styles = `
     .small-button-active {
         ... .small-button;
         color: 'floralwhite';
+        borderColor: 'floralwhite';
     }
 
     #atlas-list-container {
@@ -373,7 +377,7 @@ function onResize() {
     ctx.imageSmoothingEnabled = false;
 
     smallScreen = (width < 600 || height < 600);
-    toolSize = smallScreen ? 24 : 64;
+    toolSize = settingsToolSize ?? (smallScreen ? 24 : 64);
     toolsOffset = height - (toolSize + 5) * 4 - 5 - 5;
 }
 
@@ -393,7 +397,9 @@ function regenerateUI() {
 
     ui = [
         createToolsContainer(),
-        createAtlasTiles(tileRows),
+        settingsOpen
+            ? settingsContainer
+            : createAtlasTiles(tileRows),
     ];
 }
 
@@ -486,12 +492,88 @@ const redoButton: Button<undefined> = {
     onClick: historyRedo
 };
 
+const settingsButton: Button<undefined> = {
+    kind: 'button',
+    id: 'settings-button',
+    data: undefined,
+    get style() {
+        return settingsOpen ? '.small-button-active' : '.small-button';
+    },
+    inner: {
+        kind: 'text',
+        text: '⚙',
+    },
+    onClick: () => {
+        settingsOpen = !settingsOpen;
+        regenerateUI();
+    }
+};
+
 const smallTools: AutoContainer = {
     kind: 'auto-container',
     id: 'small-tools-container',
     mode: 'column',
-    children: [ zoomButton, tileRowsButton, deleteModeButton, undoButton, redoButton ],
+    children: [ zoomButton, tileRowsButton, deleteModeButton, undoButton, redoButton, settingsButton ],
     style: { gap: 5 },
+};
+
+const settingsContainer: AutoContainer = {
+    kind: 'auto-container',
+    id: 'tiles-container',
+    mode: 'column',
+    children: [
+        {
+            kind: 'auto-container',
+            id: 'tile-size-row',
+            mode: 'row',
+            children: [
+                {
+                    kind: 'text',
+                    id: 'tool-size-label',
+                    text: 'Tool size:',
+                    style: {
+                        color: 'floralwhite',
+                        font: '16px monospace',
+                        h: 21,
+                    }
+                },
+                {
+                        kind: 'button',
+                        id: `tool-size-auto`,
+                        data: undefined,
+                        get style() { return settingsToolSize ? '.small-button' : '.small-button-active' },
+                        inner: {
+                            kind: 'text',
+                            text: 'auto'
+                        },
+                        onClick: () => {
+                            settingsToolSize = undefined;
+                            onResize();
+                        }
+                },
+                ... GridSizes.map<UI>(sz => {
+                    return {
+                        kind: 'button',
+                        id: `tool-size-${sz}`,
+                        data: undefined,
+                        get style() { return toolSize === sz ? '.small-button-active' : '.small-button' },
+                        inner: {
+                            kind: 'text',
+                            text: String(sz)
+                        },
+
+                        onClick: () => {
+                            settingsToolSize = sz;
+
+                            onResize();
+                        }
+                    };
+                }),
+            ],
+            style: { gap: 5 }
+        },
+    ],
+    style: '#tiles-container',
 };
 
 function createAtlasList(): AutoContainer {

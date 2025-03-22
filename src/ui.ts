@@ -268,7 +268,7 @@ function drawText(o: UIText) {
 
     ctx.fillText(o.text, ld.x, ld.y);
 
-    if (!displayBoundingBoxes) {
+    if (displayBoundingBoxes) {
         ctx.strokeStyle = 'red';
         ctx.lineWidth = 1;
         ctx.strokeRect(ld.x, ld.y, ld.w, ld.h);
