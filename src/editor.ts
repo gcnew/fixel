@@ -843,8 +843,8 @@ function addTouchListeners() {
             return;
         }
 
-        const deltaX = touch.clientX - touchX;
-        const deltaY = touch.clientY - touchY;
+        const deltaX = touchX - touch.clientX;
+        const deltaY = touchY - touch.clientY;
 
         touchX = touch.clientX;
         touchY = touch.clientY;
