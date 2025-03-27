@@ -398,7 +398,7 @@ define("mini-css", ["require", "exports"], function (require, exports) {
         const rules = [];
         const left = style
             .trim()
-            .replaceAll(/[a-z_]+\s*=[^;]*?;/gi, matched => {
+            .replaceAll(/[a-z_][a-z_0-9]*\s*=[^;]*?;/gi, matched => {
             const compiled = compileVar(matched);
             if (!compiled) {
                 return matched;
@@ -406,7 +406,7 @@ define("mini-css", ["require", "exports"], function (require, exports) {
             vars.push(compiled);
             return '';
         })
-            .replaceAll(/[#.]?[a-z-_]+\s*{[^}]+?}/gi, matched => {
+            .replaceAll(/[#.]?[a-z-_][a-z-_0-9]*\s*{[^}]+?}/gi, matched => {
             const compiled = compileRule(matched);
             if (!compiled) {
                 return matched;
@@ -432,7 +432,7 @@ define("mini-css", ["require", "exports"], function (require, exports) {
     }
     exports.compileStyle = compileStyle;
     function compileVar(def) {
-        const [_, name, expr] = /([a-z_]+)\s*=\s*([^;]*?;)/gi.exec(def) || [];
+        const [_, name, expr] = /([a-z_][a-z_0-9]*)\s*=\s*([^;]*?;)/gi.exec(def) || [];
         if (!name) {
             return undefined;
         }
@@ -443,7 +443,7 @@ define("mini-css", ["require", "exports"], function (require, exports) {
         return { name, func };
     }
     function compileRule(def) {
-        const [_, name, body] = /([#.]?[a-z-_]+)\s*{([^}]+?)}/gi.exec(def) || [];
+        const [_, name, body] = /([#.]?[a-z-_][a-z-_0-9]*)\s*{([^}]+?)}/gi.exec(def) || [];
         if (!name) {
             return undefined;
         }
@@ -475,7 +475,7 @@ define("mini-css", ["require", "exports"], function (require, exports) {
             saved.push(matched);
             return `___SAVED___`;
         })
-            .replace(/[a-z_]+/gi, 'this.$&')
+            .replace(/[a-z_][a-z_0-9]*/gi, 'this.$&')
             .replace(/this\.___SAVED___/g, () => {
             return saved.shift();
         });
@@ -522,6 +522,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         color: 'aqua',
         font: '12px monospace',
         textAlign: 'left',
+        textVAlign: 'center',
         borderW: 0,
         borderColor: 'aqua',
         gap: 0,
@@ -530,6 +531,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
     const styles = {};
     const layoutDataCache = {};
     const loadedAtlases = {};
+    const idMap = new WeakMap();
     let displayBoundingBoxes = false;
     function accessDisplayBoundingBoxes(val) {
         if (typeof val === 'boolean') {
@@ -556,34 +558,81 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         engine_1.ctx.textBaseline = baseline;
     }
     exports.drawUI = layoutDraw;
-    function drawUI(ui) {
+    function calcBoxes(ui) {
         for (const o of ui) {
             switch (o.kind) {
-                case 'text':
-                    drawText(o);
-                    break;
                 case 'button':
-                    drawButton(o);
+                    calcButtonBox(o);
+                    break;
+                case 'text':
+                    calcTextBox(o);
                     break;
                 case 'auto-container':
-                    drawAutoContainer(o);
+                    calcAutoContainerBox(o);
                     break;
                 default: (0, util_2.assertNever)(o);
             }
         }
     }
-    function calcBoxes(ui) {
-        for (const o of ui) {
-            switch (o.kind) {
-                case 'button': break;
-                case 'text':
-                    calcBoxText(o);
-                    break;
-                case 'auto-container':
-                    calcBoxAutoContainer(o);
-                    break;
-                default: (0, util_2.assertNever)(o);
+    function calcButtonBox(o) {
+        const ld = getOrCreateLayout(o);
+        if (o.inner.kind === 'text') {
+            engine_1.ctx.font = ld.font;
+            const dims = engine_1.ctx.measureText(o.inner.text);
+            ld.textMetrics = dims;
+            if (ld.style?.w === undefined) {
+                ld.w = dims.width + 10;
             }
+            if (ld.style?.h === undefined) {
+                ld.h = dims.actualBoundingBoxDescent + 10;
+            }
+        }
+        if (o.inner.kind === 'image') {
+            if (ld.style?.w === undefined) {
+                ld.w = o.inner.w;
+            }
+            if (ld.style?.h === undefined) {
+                ld.h = o.inner.h;
+            }
+        }
+    }
+    function calcTextBox(o) {
+        const ld = getOrCreateLayout(o);
+        engine_1.ctx.font = ld.font;
+        const dims = engine_1.ctx.measureText(o.text);
+        ld.textMetrics = dims;
+        if (ld.style?.w === undefined) {
+            ld.w = dims.width;
+        }
+        if (ld.style?.h === undefined) {
+            ld.h = dims.actualBoundingBoxDescent;
+        }
+    }
+    function calcAutoContainerBox(o) {
+        const ld = getOrCreateLayout(o);
+        // first, layout its children to obtain accurate (w,h)
+        calcBoxes(o.children);
+        ld.scrollHeight = o.mode === 'row'
+            ? o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).h), 0)
+            : o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h + ld.gap, 0) + (o.children.length > 0 ? -ld.gap : 0);
+        ld.scrollWidth = o.mode === 'row'
+            ? o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w + ld.gap, 0) + (o.children.length > 0 ? -ld.gap : 0)
+            : o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).w), 0);
+        ld.scrollX = (0, util_2.clamp)(ld.scrollX, Math.min(ld.w, ld.scrollWidth) - ld.scrollWidth, 0);
+        ld.scrollY = (0, util_2.clamp)(ld.scrollY, Math.min(ld.h, ld.scrollHeight) - ld.scrollHeight, 0);
+        if (ld.style?.h === undefined) {
+            ld.h = ld.scrollHeight;
+        }
+        if (ld.style?.w === undefined) {
+            ld.w = ld.scrollWidth;
+        }
+        const maxHeight = ld.style?.maxHeight;
+        if (maxHeight) {
+            ld.h = Math.min(maxHeight, ld.scrollHeight);
+        }
+        const maxWidth = ld.style?.maxWidth;
+        if (maxWidth) {
+            ld.w = Math.min(maxWidth, ld.scrollWidth);
         }
     }
     function layout(ui) {
@@ -596,49 +645,6 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                     break;
                 default: (0, util_2.assertNever)(o);
             }
-        }
-    }
-    function calcBoxText(o) {
-        const ld = getOrCreateLayout(o);
-        engine_1.ctx.font = ld.font;
-        const dims = engine_1.ctx.measureText(o.text);
-        if (ld.style.w === undefined) {
-            ld.w = dims.width;
-        }
-        if (ld.style.h === undefined) {
-            ld.h = dims.actualBoundingBoxDescent;
-        }
-        if (!displayBoundingBoxes) {
-            engine_1.ctx.strokeStyle = 'red';
-            engine_1.ctx.lineWidth = 1;
-            engine_1.ctx.strokeRect(ld.x, ld.y, ld.w, ld.h);
-        }
-    }
-    function calcBoxAutoContainer(o) {
-        const ld = getOrCreateLayout(o);
-        // first, layout its children to obtain accurate (w,h)
-        calcBoxes(o.children);
-        ld.scrollHeight = o.mode === 'row'
-            ? o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).h), 0)
-            : o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h + ld.gap, 0) + (o.children.length > 0 ? -ld.gap : 0);
-        ld.scrollWidth = o.mode === 'row'
-            ? o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w + ld.gap, 0) + (o.children.length > 0 ? -ld.gap : 0)
-            : o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).w), 0);
-        ld.scrollX = (0, util_2.clamp)(ld.scrollX, Math.min(ld.w, ld.scrollWidth) - ld.scrollWidth, 0);
-        ld.scrollY = (0, util_2.clamp)(ld.scrollY, Math.min(ld.h, ld.scrollHeight) - ld.scrollHeight, 0);
-        if (!ld.style.h) {
-            ld.h = ld.scrollHeight;
-        }
-        if (!ld.style.w) {
-            ld.w = ld.scrollWidth;
-        }
-        const maxHeight = ld.style?.maxHeight;
-        if (maxHeight) {
-            ld.h = Math.min(maxHeight, ld.scrollHeight);
-        }
-        const maxWidth = ld.style?.maxWidth;
-        if (maxWidth) {
-            ld.w = Math.min(maxWidth, ld.scrollWidth);
         }
     }
     function layoutAutoContainer(o) {
@@ -658,24 +664,47 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         }
         layout(o.children);
     }
+    function drawUI(ui) {
+        for (const o of ui) {
+            switch (o.kind) {
+                case 'text':
+                    drawText(o);
+                    break;
+                case 'button':
+                    drawButton(o);
+                    break;
+                case 'auto-container':
+                    drawAutoContainer(o);
+                    break;
+                default: (0, util_2.assertNever)(o);
+            }
+        }
+    }
     function drawText(o) {
         const ld = getOrCreateLayout(o);
-        engine_1.ctx.textBaseline = 'top';
+        let hOffset;
+        switch (ld.textVAlign) {
+            case 'top':
+                hOffset = 0;
+                break;
+            case 'center':
+                hOffset = (ld.h - ld.textMetrics.actualBoundingBoxDescent) / 2 | 0;
+                break;
+            case 'bottom':
+                hOffset = (ld.h - ld.textMetrics.actualBoundingBoxDescent) | 0;
+                break;
+        }
         engine_1.ctx.fillStyle = ld.color;
         engine_1.ctx.font = ld.font;
-        engine_1.ctx.fillText(o.text, ld.x, ld.y);
-        if (!displayBoundingBoxes) {
-            engine_1.ctx.strokeStyle = 'red';
-            engine_1.ctx.lineWidth = 1;
-            engine_1.ctx.strokeRect(ld.x, ld.y, ld.w, ld.h);
-        }
+        engine_1.ctx.fillText(o.text, ld.x, ld.y + hOffset);
+        drawBoundingBox(ld);
     }
     function drawButton(o) {
         const ld = getOrCreateLayout(o);
         if (o.inner.kind === 'text') {
             engine_1.ctx.fillStyle = ld.color;
             engine_1.ctx.font = ld.font;
-            const dims = engine_1.ctx.measureText(o.inner.text);
+            const dims = ld.textMetrics;
             const ch = (ld.h - dims.actualBoundingBoxDescent) / 2 | 0;
             let wOffset;
             switch (ld.textAlign) {
@@ -694,9 +723,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             }
             engine_1.ctx.fillText(o.inner.text, ld.x + wOffset, ld.y + ch, ld.w - 9);
             if (displayBoundingBoxes) {
-                engine_1.ctx.strokeStyle = 'red';
-                engine_1.ctx.lineWidth = 1;
-                engine_1.ctx.strokeRect(ld.x + ld.w - dims.width - 4, ld.y, dims.width, dims.fontBoundingBoxDescent);
+                drawBoundingBox({ x: ld.x + ld.w - dims.width - 4, y: ld.y, w: dims.width, h: dims.fontBoundingBoxDescent });
             }
         }
         if (o.inner.kind === 'image') {
@@ -706,6 +733,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             }
         }
         drawBorder(ld);
+        drawBoundingBox(ld);
     }
     function drawBorder(ld) {
         const borderW = ld.borderW;
@@ -765,14 +793,22 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             engine_1.ctx.restore();
         }
         drawBorder(ld);
+        drawBoundingBox(ld);
+    }
+    function drawBoundingBox({ x, y, w, h }) {
         if (displayBoundingBoxes) {
             engine_1.ctx.strokeStyle = 'red';
             engine_1.ctx.lineWidth = 1;
-            engine_1.ctx.strokeRect(ld.x, ld.y, ld.w, ld.h);
+            engine_1.ctx.strokeRect(x, y, w, h);
         }
     }
     function getOrCreateLayout(o) {
-        const existing = layoutDataCache[o.id];
+        let id = o.id ?? idMap.get(o);
+        if (id === undefined) {
+            id = (0, util_2.uuid)();
+            idMap.set(o, id);
+        }
+        const existing = layoutDataCache[id];
         if (existing && existing.style === o.style) {
             return existing.layout;
         }
@@ -780,7 +816,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             ? styles[o.style]
             : o.style;
         const ld = createLayoutData(style);
-        layoutDataCache[o.id] = { style: o.style, layout: ld };
+        layoutDataCache[id] = { style: o.style, layout: ld };
         return ld;
     }
     function createLayoutData(style) {
@@ -789,15 +825,16 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             $y: undefined,
             $w: undefined,
             $h: undefined,
-            style: style ?? defaultStyle,
-            get x() { return this.$x ?? this.style.x ?? defaultStyle.x; },
+            style,
+            get x() { return this.$x ?? style?.x ?? defaultStyle.x; },
             set x(val) { this.$x = val; },
-            get y() { return this.$y ?? this.style.y ?? defaultStyle.y; },
+            get y() { return this.$y ?? style?.y ?? defaultStyle.y; },
             set y(val) { this.$y = val; },
-            get w() { return this.$w ?? this.style.w ?? defaultStyle.w; },
+            get w() { return this.$w ?? style?.w ?? defaultStyle.w; },
             set w(val) { this.$w = val; },
-            get h() { return this.$h ?? this.style.h ?? defaultStyle.h; },
+            get h() { return this.$h ?? style?.h ?? defaultStyle.h; },
             set h(val) { this.$h = val; },
+            textMetrics: undefined,
             scroll: style?.scroll,
             scrollX: 0,
             scrollY: 0,
@@ -809,6 +846,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             get color() { return style?.color || defaultStyle.color; },
             get font() { return style?.font || defaultStyle.font; },
             get textAlign() { return style?.textAlign || defaultStyle.textAlign; },
+            get textVAlign() { return style?.textVAlign || defaultStyle.textVAlign; },
             get borderW() { return style?.borderW || defaultStyle.borderW; },
             get borderColor() { return style?.borderColor || defaultStyle.borderColor; },
             get gap() { return style?.gap || defaultStyle.gap; },
@@ -943,9 +981,13 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     let sliceSize = 16;
     let toolsOffset;
     let smallScreen;
+    let settings_toolSize;
+    let settings_buttons = new Set(['gridSize', 'noRows', 'delMode', 'undo', 'redo']);
     let mouseDown = false;
     let deleteMode = false;
+    let settingsOpen = false;
     const GridSizes = [16, 24, 32, 48, 64, 80, 96, 128];
+    const AllButtons = ['gridSize', 'noRows', 'delMode', 'undo', 'redo'];
     let tiles = [];
     let historyIndex = 0;
     let massHistoryStart;
@@ -971,6 +1013,15 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         },
     };
     const styles = `
+
+    .settings-container {
+        x: 5;
+        y: toolsOffset + 20;
+        w: width - 10;
+        h: height - toolsOffset - 30;
+        gap: 15;
+        scroll: 'y';
+    }
 
     #tiles-container {
         x: 5;
@@ -1012,6 +1063,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     .small-button-active {
         ... .small-button;
         color: 'floralwhite';
+        borderColor: 'floralwhite';
     }
 
     #atlas-list-container {
@@ -1034,6 +1086,38 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
 
     .atlas-list-button-active {
         ... .atlas-list-button;
+        color: 'floralwhite';
+    }
+
+    .gap5 {
+        gap: 5;
+    }
+
+    .settings-label {
+        color: 'floralwhite';
+        font: '16px monospace';
+        h: 21;
+        w: 150;
+    }
+
+    .checkbox {
+        borderW: 2;
+        borderColor: 'grey';
+        color: 'floralwhite';
+        font: '16px monospace';
+        textAlign: 'center';
+        w: 20;
+        h: 20;
+    }
+
+    .checkbox-label {
+        color: 'darkgray';
+        font: '14px monospace';
+        h: 21;
+    }
+
+    .checkbox-label-active {
+        ... .checkbox-label;
         color: 'floralwhite';
     }
 `;
@@ -1186,7 +1270,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     function onResize() {
         engine_2.ctx.imageSmoothingEnabled = false;
         smallScreen = (engine_2.width < 600 || engine_2.height < 600);
-        toolSize = smallScreen ? 24 : 64;
+        toolSize = settings_toolSize ?? (smallScreen ? 24 : 64);
         toolsOffset = engine_2.height - (toolSize + 5) * 4 - 5 - 5;
     }
     function onScrollListener(e) {
@@ -1200,25 +1284,24 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         if (loading) {
             return;
         }
-        ui = [
-            createToolsContainer(),
-            createAtlasTiles(tileRows),
-        ];
+        ui = settingsOpen
+            ? [settingsContainer]
+            : [
+                createToolsContainer(),
+                createAtlasTiles(tileRows),
+            ];
     }
     function createToolsContainer() {
         const container = {
             kind: 'auto-container',
-            id: 'tools-container',
             mode: 'row',
-            children: [smallTools, createAtlasList()],
+            children: [createSmallTools(), createAtlasList()],
             style: '#tools-container',
         };
         return container;
     }
     const zoomButton = {
         kind: 'button',
-        id: 'zoom-button',
-        data: undefined,
         style: '.small-button',
         inner: {
             kind: 'text',
@@ -1233,8 +1316,6 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     };
     const tileRowsButton = {
         kind: 'button',
-        id: 'tile-rows-button',
-        data: undefined,
         style: '.small-button',
         inner: {
             kind: 'text',
@@ -1249,8 +1330,6 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     };
     const deleteModeButton = {
         kind: 'button',
-        id: 'delete-mode-button',
-        data: undefined,
         get style() {
             return deleteMode ? '.small-button-active' : '.small-button';
         },
@@ -1264,8 +1343,6 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     };
     const undoButton = {
         kind: 'button',
-        id: 'undo-button',
-        data: undefined,
         style: '.small-button',
         inner: {
             kind: 'text',
@@ -1275,8 +1352,6 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     };
     const redoButton = {
         kind: 'button',
-        id: 'redo-button',
-        data: undefined,
         style: '.small-button',
         inner: {
             kind: 'text',
@@ -1284,40 +1359,179 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         },
         onClick: historyRedo
     };
-    const smallTools = {
+    const settingsButton = {
+        kind: 'button',
+        get style() {
+            return settingsOpen ? '.small-button-active' : '.small-button';
+        },
+        inner: {
+            kind: 'text',
+            text: '⚙',
+        },
+        onClick: () => {
+            settingsOpen = !settingsOpen;
+            regenerateUI();
+        }
+    };
+    const smallButtons = {
+        gridSize: zoomButton,
+        noRows: tileRowsButton,
+        delMode: deleteModeButton,
+        undo: undoButton,
+        redo: redoButton,
+    };
+    function createSmallTools() {
+        return {
+            kind: 'auto-container',
+            mode: 'column',
+            children: [
+                ...AllButtons.flatMap(btn => settings_buttons.has(btn) ? [smallButtons[btn]] : []),
+                settingsButton
+            ],
+            style: {
+                gap: 5,
+                scroll: 'y',
+                get maxHeight() { return engine_2.height - toolsOffset - 20; }
+            },
+        };
+    }
+    ;
+    const toolSizeRow = {
         kind: 'auto-container',
-        id: 'small-tools-container',
+        mode: 'row',
+        children: [
+            {
+                kind: 'text',
+                text: 'Tile size:',
+                style: '.settings-label'
+            },
+            {
+                kind: 'auto-container',
+                mode: 'row',
+                style: 'gap5',
+                children: [
+                    {
+                        kind: 'button',
+                        get style() { return settings_toolSize ? '.small-button' : '.small-button-active'; },
+                        inner: {
+                            kind: 'text',
+                            text: 'auto'
+                        },
+                        onClick: () => {
+                            settings_toolSize = undefined;
+                            onResize();
+                        }
+                    },
+                    ...GridSizes.map(sz => {
+                        return {
+                            kind: 'button',
+                            get style() { return toolSize === sz ? '.small-button-active' : '.small-button'; },
+                            inner: {
+                                kind: 'text',
+                                text: String(sz)
+                            },
+                            onClick: () => {
+                                settings_toolSize = sz;
+                                onResize();
+                            }
+                        };
+                    }),
+                ],
+            },
+        ],
+    };
+    const availableButtons = {
+        kind: 'auto-container',
+        mode: 'row',
+        children: [
+            {
+                kind: 'text',
+                text: 'Active tools:',
+                style: '.settings-label'
+            },
+            {
+                kind: 'auto-container',
+                mode: 'row',
+                style: { gap: 20 },
+                children: AllButtons.map(btn => {
+                    const checkbox = {
+                        kind: 'button',
+                        inner: {
+                            kind: 'text',
+                            get text() {
+                                return settings_buttons.has(btn) ? 'x' : ' ';
+                            },
+                        },
+                        style: '.checkbox',
+                        onClick: () => {
+                            if (settings_buttons.has(btn)) {
+                                settings_buttons.delete(btn);
+                            }
+                            else {
+                                settings_buttons.add(btn);
+                            }
+                        },
+                    };
+                    const label = {
+                        kind: 'text',
+                        text: btn,
+                        get style() {
+                            return settings_buttons.has(btn) ? '.checkbox-label-active' : '.checkbox-label';
+                        }
+                    };
+                    return {
+                        kind: 'auto-container',
+                        mode: 'row',
+                        style: { gap: 8 },
+                        children: [checkbox, label],
+                    };
+                }),
+            },
+        ],
+    };
+    const settingsContainer = {
+        kind: 'auto-container',
         mode: 'column',
-        children: [zoomButton, tileRowsButton, deleteModeButton, undoButton, redoButton],
-        style: { gap: 5 },
+        style: '.settings-container',
+        children: [
+            toolSizeRow,
+            availableButtons,
+            {
+                kind: 'button',
+                inner: {
+                    kind: 'text',
+                    text: 'Close',
+                },
+                style: { borderW: 1, borderColor: 'darkgray', color: 'darkgray' },
+                onClick: () => { settingsOpen = false, regenerateUI(); }
+            }
+        ],
     };
     function createAtlasList() {
         const list = atlasPaths.map(path => {
             const text = path
                 .replace('img/', '')
                 .replace('.png', '');
-            return {
+            const button = {
                 kind: 'button',
-                id: path,
-                data: undefined,
                 get style() {
                     return curAtlas === path ? '.atlas-list-button-active' : '.atlas-list-button';
                 },
                 inner: { kind: 'text', text },
-                onClick: onAtlasButtonClick
+                onClick: () => onAtlasButtonClick(path)
             };
+            return button;
         });
         const container = {
             kind: 'auto-container',
-            id: 'atlas-list-container',
             mode: 'column',
             children: list,
             style: '#atlas-list-container',
         };
         return container;
     }
-    function onAtlasButtonClick(x) {
-        curAtlas = x.id;
+    function onAtlasButtonClick(path) {
+        curAtlas = path;
         currentTile = undefined;
         regenerateUI();
     }
@@ -1335,8 +1549,6 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             const data = { x: ax, y: ay };
             const btn = {
                 kind: 'button',
-                id: 'btn:' + ax + ':' + ay,
-                data,
                 get style() {
                     return currentTile === data ? '.tile-active' : '.tile';
                 },
@@ -1348,16 +1560,15 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                     w: sliceSize,
                     h: sliceSize
                 },
-                onClick: onAtlasTileClick
+                onClick: () => onAtlasTileClick(data)
             };
             currRow.push(btn);
             if (i % ac === ac - 1) {
                 const container = {
                     kind: 'auto-container',
-                    id: `tiles-row:${cols.length}:${rows.length}`,
                     mode: 'row',
                     children: currRow,
-                    style: { gap: 5 },
+                    style: '.gap5',
                 };
                 rows.push(container);
                 currRow = [];
@@ -1365,12 +1576,9 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             if (rows.length === nRows || i === count - 1) {
                 const container = {
                     kind: 'auto-container',
-                    id: `tiles-col:${cols.length}`,
                     mode: 'column',
                     children: rows,
-                    style: {
-                        gap: 5
-                    },
+                    style: '.gap5',
                 };
                 cols.push(container);
                 rows = [];
@@ -1378,18 +1586,17 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         }
         const container = {
             kind: 'auto-container',
-            id: 'tiles-container',
             mode: 'row',
             children: cols,
             style: '#tiles-container',
         };
         return container;
     }
-    function onAtlasTileClick(x) {
+    function onAtlasTileClick(data) {
         deleteMode = false;
-        currentTile = currentTile === x.data
+        currentTile = currentTile === data
             ? undefined
-            : x.data;
+            : data;
     }
     function loadAtlases() {
         let leftToLoad = assetPaths.length;
