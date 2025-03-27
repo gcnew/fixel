@@ -8,7 +8,7 @@ export function compileStyle<T>(ctx0: Object, style: string): { [k: string]: T|u
 
     const left = style
         .trim()
-        .replaceAll(/[a-z_]+\s*=[^;]*?;/gi, matched => {
+        .replaceAll(/[a-z_][a-z_0-9]*\s*=[^;]*?;/gi, matched => {
             const compiled = compileVar(matched);
             if (!compiled) {
                 return matched;
@@ -17,7 +17,7 @@ export function compileStyle<T>(ctx0: Object, style: string): { [k: string]: T|u
             vars.push(compiled);
             return '';
         })
-        .replaceAll(/[#.]?[a-z-_]+\s*{[^}]+?}/gi, matched => {
+        .replaceAll(/[#.]?[a-z-_][a-z-_0-9]*\s*{[^}]+?}/gi, matched => {
             const compiled = compileRule(matched);
             if (!compiled) {
                 return matched;
@@ -50,7 +50,7 @@ export function compileStyle<T>(ctx0: Object, style: string): { [k: string]: T|u
 }
 
 function compileVar(def: string): Accessor | undefined {
-    const [_, name, expr] = /([a-z_]+)\s*=\s*([^;]*?;)/gi.exec(def) || [];
+    const [_, name, expr] = /([a-z_][a-z_0-9]*)\s*=\s*([^;]*?;)/gi.exec(def) || [];
     if (!name) {
         return undefined;
     }
@@ -64,7 +64,7 @@ function compileVar(def: string): Accessor | undefined {
 }
 
 function compileRule(def: string): CompiledRule | undefined {
-    const [_, name, body] = /([#.]?[a-z-_]+)\s*{([^}]+?)}/gi.exec(def) || [];
+    const [_, name, body] = /([#.]?[a-z-_][a-z-_0-9]*)\s*{([^}]+?)}/gi.exec(def) || [];
     if (!name) {
         return undefined;
     }
@@ -102,7 +102,7 @@ function compileExpr(expr: string): Accessor['func'] | undefined {
             saved.push(matched);
             return `___SAVED___`;
         })
-        .replace(/[a-z_]+/gi, 'this.$&')
+        .replace(/[a-z_][a-z_0-9]*/gi, 'this.$&')
         .replace(/this\.___SAVED___/g, () => {
             return saved.shift()!;
         });

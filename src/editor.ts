@@ -11,7 +11,7 @@ import {
 import { clamp, assertNever } from './util'
 import type { Shortcut } from './keyboard'
 import {
-    UI, Button, AutoContainer,
+    UI, Button, UIText, AutoContainer,
 
     drawUI, handleScrollUI, handleClickUI, addStylesUI, addAtlasesUI, displayBoundingBoxes
 } from './ui'
@@ -74,13 +74,15 @@ let sliceSize = 16;
 let toolsOffset: number;
 let smallScreen: boolean;
 
-let settingsToolSize: number | undefined;
+let settings_toolSize: number | undefined;
+let settings_buttons: Set<typeof AllButtons[number]> = new Set([ 'gridSize', 'noRows', 'delMode', 'undo', 'redo' ]);
 
 let mouseDown = false;
 let deleteMode = false;
 let settingsOpen = false;
 
 const GridSizes = [ 16, 24, 32, 48, 64, 80, 96, 128 ];
+const AllButtons = [ 'gridSize', 'noRows', 'delMode', 'undo', 'redo' ] as const;
 
 let tiles: Tile[] = [];
 
@@ -116,6 +118,15 @@ const styleContext = {
 };
 
 const styles = `
+
+    .settings-container {
+        x: 5;
+        y: toolsOffset + 20;
+        w: width - 10;
+        h: height - toolsOffset - 30;
+        gap: 15;
+        scroll: 'y';
+    }
 
     #tiles-container {
         x: 5;
@@ -180,6 +191,38 @@ const styles = `
 
     .atlas-list-button-active {
         ... .atlas-list-button;
+        color: 'floralwhite';
+    }
+
+    .gap5 {
+        gap: 5;
+    }
+
+    .settings-label {
+        color: 'floralwhite';
+        font: '16px monospace';
+        h: 21;
+        w: 150;
+    }
+
+    .checkbox {
+        borderW: 2;
+        borderColor: 'grey';
+        color: 'floralwhite';
+        font: '16px monospace';
+        textAlign: 'center';
+        w: 20;
+        h: 20;
+    }
+
+    .checkbox-label {
+        color: 'darkgray';
+        font: '14px monospace';
+        h: 21;
+    }
+
+    .checkbox-label-active {
+        ... .checkbox-label;
         color: 'floralwhite';
     }
 `;
@@ -377,7 +420,7 @@ function onResize() {
     ctx.imageSmoothingEnabled = false;
 
     smallScreen = (width < 600 || height < 600);
-    toolSize = settingsToolSize ?? (smallScreen ? 24 : 64);
+    toolSize = settings_toolSize ?? (smallScreen ? 24 : 64);
     toolsOffset = height - (toolSize + 5) * 4 - 5 - 5;
 }
 
@@ -395,30 +438,27 @@ function regenerateUI() {
         return;
     }
 
-    ui = [
-        createToolsContainer(),
-        settingsOpen
-            ? settingsContainer
-            : createAtlasTiles(tileRows),
-    ];
+    ui = settingsOpen
+        ? [ settingsContainer ]
+        : [
+            createToolsContainer(),
+            createAtlasTiles(tileRows),
+        ];
 }
 
 function createToolsContainer() {
     const container: AutoContainer = {
         kind: 'auto-container',
-        id: 'tools-container',
         mode: 'row',
-        children: [ smallTools, createAtlasList() ],
+        children: [ createSmallTools(), createAtlasList() ],
         style: '#tools-container',
     };
 
     return container;
 }
 
-const zoomButton: Button<undefined> = {
+const zoomButton: Button = {
     kind: 'button',
-    id: 'zoom-button',
-    data: undefined,
     style: '.small-button',
     inner: {
         kind: 'text',
@@ -433,10 +473,8 @@ const zoomButton: Button<undefined> = {
     }
 };
 
-const tileRowsButton: Button<undefined> = {
+const tileRowsButton: Button = {
     kind: 'button',
-    id: 'tile-rows-button',
-    data: undefined,
     style: '.small-button',
     inner: {
         kind: 'text',
@@ -451,10 +489,8 @@ const tileRowsButton: Button<undefined> = {
     }
 };
 
-const deleteModeButton: Button<undefined> = {
+const deleteModeButton: Button = {
     kind: 'button',
-    id: 'delete-mode-button',
-    data: undefined,
     get style() {
         return deleteMode ? '.small-button-active' : '.small-button';
     },
@@ -462,16 +498,13 @@ const deleteModeButton: Button<undefined> = {
         kind: 'text',
         text: 'DEL',
     },
-
     onClick: () => {
         deleteMode = !deleteMode;
     }
 };
 
-const undoButton: Button<undefined> = {
+const undoButton: Button = {
     kind: 'button',
-    id: 'undo-button',
-    data: undefined,
     style: '.small-button',
     inner: {
         kind: 'text',
@@ -480,10 +513,8 @@ const undoButton: Button<undefined> = {
     onClick: historyUndo
 };
 
-const redoButton: Button<undefined> = {
+const redoButton: Button = {
     kind: 'button',
-    id: 'redo-button',
-    data: undefined,
     style: '.small-button',
     inner: {
         kind: 'text',
@@ -492,10 +523,8 @@ const redoButton: Button<undefined> = {
     onClick: historyRedo
 };
 
-const settingsButton: Button<undefined> = {
+const settingsButton: Button = {
     kind: 'button',
-    id: 'settings-button',
-    data: undefined,
     get style() {
         return settingsOpen ? '.small-button-active' : '.small-button';
     },
@@ -509,53 +538,60 @@ const settingsButton: Button<undefined> = {
     }
 };
 
-const smallTools: AutoContainer = {
-    kind: 'auto-container',
-    id: 'small-tools-container',
-    mode: 'column',
-    children: [ zoomButton, tileRowsButton, deleteModeButton, undoButton, redoButton, settingsButton ],
-    style: { gap: 5 },
+const smallButtons = {
+    gridSize: zoomButton,
+    noRows: tileRowsButton,
+    delMode: deleteModeButton,
+    undo: undoButton,
+    redo: redoButton,
 };
 
-const settingsContainer: AutoContainer = {
+function createSmallTools(): AutoContainer {
+    return {
+        kind: 'auto-container',
+        mode: 'column',
+        children: [
+            ... AllButtons.flatMap(btn => settings_buttons.has(btn) ? [ smallButtons[btn] ] : []),
+            settingsButton
+        ],
+        style: {
+            gap: 5,
+            scroll: 'y',
+            get maxHeight() { return height - toolsOffset - 20; }
+        },
+    };
+};
+
+const toolSizeRow: AutoContainer = {
     kind: 'auto-container',
-    id: 'tiles-container',
-    mode: 'column',
+    mode: 'row',
     children: [
         {
+            kind: 'text',
+            text: 'Tile size:',
+            style: '.settings-label'
+        },
+        {
             kind: 'auto-container',
-            id: 'tile-size-row',
             mode: 'row',
+            style: 'gap5',
             children: [
                 {
-                    kind: 'text',
-                    id: 'tool-size-label',
-                    text: 'Tool size:',
-                    style: {
-                        color: 'floralwhite',
-                        font: '16px monospace',
-                        h: 21,
+                    kind: 'button',
+                    get style() { return settings_toolSize ? '.small-button' : '.small-button-active' },
+                    inner: {
+                        kind: 'text',
+                        text: 'auto'
+                    },
+                    onClick: () => {
+                        settings_toolSize = undefined;
+                        onResize();
                     }
                 },
-                {
-                        kind: 'button',
-                        id: `tool-size-auto`,
-                        data: undefined,
-                        get style() { return settingsToolSize ? '.small-button' : '.small-button-active' },
-                        inner: {
-                            kind: 'text',
-                            text: 'auto'
-                        },
-                        onClick: () => {
-                            settingsToolSize = undefined;
-                            onResize();
-                        }
-                },
+
                 ... GridSizes.map<UI>(sz => {
                     return {
                         kind: 'button',
-                        id: `tool-size-${sz}`,
-                        data: undefined,
                         get style() { return toolSize === sz ? '.small-button-active' : '.small-button' },
                         inner: {
                             kind: 'text',
@@ -563,42 +599,110 @@ const settingsContainer: AutoContainer = {
                         },
 
                         onClick: () => {
-                            settingsToolSize = sz;
+                            settings_toolSize = sz;
 
                             onResize();
                         }
                     };
                 }),
             ],
-            style: { gap: 5 }
         },
     ],
-    style: '#tiles-container',
+};
+
+const availableButtons: AutoContainer = {
+    kind: 'auto-container',
+    mode: 'row',
+    children: [
+        {
+            kind: 'text',
+            text: 'Active tools:',
+            style: '.settings-label'
+        },
+        {
+            kind: 'auto-container',
+            mode: 'row',
+            style: { gap: 20 },
+            children: AllButtons.map<UI>(btn => {
+                const checkbox: Button = {
+                    kind: 'button',
+                    inner: {
+                        kind: 'text',
+                        get text() {
+                            return settings_buttons.has(btn) ? 'x' : ' ';
+                        },
+                    },
+                    style: '.checkbox',
+                    onClick: () => {
+                        if (settings_buttons.has(btn)) {
+                            settings_buttons.delete(btn);
+                        } else {
+                            settings_buttons.add(btn);
+                        }
+                    },
+                };
+
+                const label: UIText = {
+                    kind: 'text',
+                    text: btn,
+                    get style() {
+                        return settings_buttons.has(btn) ? '.checkbox-label-active' : '.checkbox-label';
+                    }
+                };
+
+                return {
+                    kind: 'auto-container',
+                    mode: 'row',
+                    style: { gap: 8 },
+                    children: [ checkbox, label ],
+                };
+            }),
+        },
+    ],
+};
+
+const settingsContainer: AutoContainer = {
+    kind: 'auto-container',
+    mode: 'column',
+    style: '.settings-container',
+    children: [
+        toolSizeRow,
+        availableButtons,
+
+        {
+            kind: 'button',
+            inner: {
+                kind: 'text',
+                text: 'Close',
+            },
+            style: { borderW: 1, borderColor: 'darkgray', color: 'darkgray' },
+            onClick: () => { settingsOpen = false, regenerateUI(); }
+        }
+    ],
 };
 
 function createAtlasList(): AutoContainer {
-    const list = atlasPaths.map<Button<undefined>>(path => {
+    const list = atlasPaths.map(path => {
         const text = path
             .replace('img/', '')
             .replace('.png', '');
 
-        return {
+        const button: Button = {
             kind: 'button',
-            id: path,
-            data: undefined,
 
             get style() {
                 return curAtlas === path ? '.atlas-list-button-active' : '.atlas-list-button';
             },
 
             inner: { kind: 'text', text },
-            onClick: onAtlasButtonClick
+            onClick: () => onAtlasButtonClick(path)
         };
+
+        return button;
     });
 
     const container: AutoContainer = {
         kind: 'auto-container',
-        id: 'atlas-list-container',
         mode: 'column',
         children: list,
         style: '#atlas-list-container',
@@ -607,8 +711,8 @@ function createAtlasList(): AutoContainer {
     return container;
 }
 
-function onAtlasButtonClick(x: Button<undefined>) {
-    curAtlas = x.id;
+function onAtlasButtonClick(path: string) {
+    curAtlas = path;
     currentTile = undefined;
 
     regenerateUI();
@@ -631,10 +735,8 @@ function createAtlasTiles(nRows: number): AutoContainer {
         const ay = i / ac | 0;
         const data = { x: ax, y: ay };
 
-        const btn: Button<{x: number, y: number}> = {
+        const btn: Button = {
             kind: 'button',
-            id: 'btn:' + ax + ':' + ay,
-            data,
 
             get style() {
                 return currentTile === data ? '.tile-active' : '.tile';
@@ -648,17 +750,16 @@ function createAtlasTiles(nRows: number): AutoContainer {
                 w: sliceSize,
                 h: sliceSize
             },
-            onClick: onAtlasTileClick
+            onClick: () => onAtlasTileClick(data)
         };
 
         currRow.push(btn);
         if (i % ac === ac - 1) {
             const container: AutoContainer = {
                 kind: 'auto-container',
-                id: `tiles-row:${cols.length}:${rows.length}`,
                 mode: 'row',
                 children: currRow,
-                style: { gap: 5 },
+                style: '.gap5',
             };
 
             rows.push(container);
@@ -668,12 +769,9 @@ function createAtlasTiles(nRows: number): AutoContainer {
         if (rows.length === nRows || i === count - 1) {
             const container: AutoContainer = {
                 kind: 'auto-container',
-                id: `tiles-col:${cols.length}`,
                 mode: 'column',
                 children: rows,
-                style: {
-                    gap: 5
-                },
+                style: '.gap5',
             };
 
             cols.push(container);
@@ -683,7 +781,6 @@ function createAtlasTiles(nRows: number): AutoContainer {
 
     const container: AutoContainer = {
         kind: 'auto-container',
-        id: 'tiles-container',
         mode: 'row',
         children: cols,
         style: '#tiles-container',
@@ -692,11 +789,11 @@ function createAtlasTiles(nRows: number): AutoContainer {
     return container;
 }
 
-function onAtlasTileClick(x: Button<NonNullable<typeof currentTile>>) {
+function onAtlasTileClick(data: typeof currentTile) {
     deleteMode = false;
-    currentTile = currentTile === x.data
+    currentTile = currentTile === data
         ? undefined
-        : x.data;
+        : data;
 }
 
 function loadAtlases() {
