@@ -4,7 +4,7 @@ import {
 
     canvas, ctx,
 
-    width, height, mouseX, mouseY, clickY, isMac,
+    width, height, mouseX, mouseY, clickY, isMac, pressedKeys,
     listen, unlisten, registerShortcuts, removeShortcuts,
 } from './engine'
 
@@ -20,7 +20,8 @@ import {
 type Action = { kind: 'add-tiles',    tiles: Tile[] }
             | { kind: 'delete-tiles', tiles: Tile[] }
 
-type Tile = { x: number, y: number, atlasX: number, atlasY: number, atlas: string }
+type Tile         = { x: number, y: number, atlasX: number, atlasY: number, atlas: string }
+type SelectedTile = { x: number, y: number, dx: number, dy: number }
 
 const META_KEY = isMac ? 'META' : 'CTRL';
 
@@ -75,14 +76,16 @@ let toolsOffset: number;
 let smallScreen: boolean;
 
 let settings_toolSize: number | undefined;
-let settings_buttons: Set<typeof AllButtons[number]> = new Set([ 'gridSize', 'noRows', 'delMode', 'undo', 'redo' ]);
+let settings_multiselect: true | undefined;
+let settings_buttons: Set<typeof AllButtons[number]> = new Set([ 'gridSize', 'noRows', 'delMode', 'multiselect', 'undo', 'redo' ]);
 
 let mouseDown = false;
 let deleteMode = false;
+let multiselectMode = false;
 let settingsOpen = false;
 
 const GridSizes = [ 16, 24, 32, 48, 64, 80, 96, 128 ];
-const AllButtons = [ 'gridSize', 'noRows', 'delMode', 'undo', 'redo' ] as const;
+const AllButtons = [ 'gridSize', 'noRows', 'delMode', 'multiselect', 'undo', 'redo' ] as const;
 
 let tiles: Tile[] = [];
 
@@ -91,7 +94,7 @@ let massHistoryStart: number | undefined;
 const history: Action[] = [];
 
 let curAtlas = 'img/grass.png';
-let currentTile: { x: number, y: number } | undefined;
+let currentTiles: SelectedTile[] | undefined;
 
 let ui: UI[] = [];
 
@@ -273,33 +276,46 @@ export function draw() {
 }
 
 function beforeDraw() {
-    if (mouseDown && clickY! <= toolsOffset && mouseY <= toolsOffset) {
-        const { x, y } = toTileCoordinates(mouseX, mouseY);
+    handleMouseDraw();
 
-        if (deleteMode) {
-            const toDelete = tiles.filter(t => t.x === x && t.y === y);
+    multiselectMode = settings_multiselect ?? !!pressedKeys.META;
+}
 
-            if (toDelete.length) {
-                executeAction({ kind: 'delete-tiles', tiles: toDelete });
-            }
+function handleMouseDraw() {
+    if (!mouseDown || clickY! >= toolsOffset || mouseY >= toolsOffset) {
+        return;
+    }
 
-            return;
+    const { x, y } = toTileCoordinates(mouseX, mouseY);
+
+    if (deleteMode) {
+        const toDelete = tiles.filter(t => t.x === x && t.y === y);
+
+        if (toDelete.length) {
+            executeAction({ kind: 'delete-tiles', tiles: toDelete });
         }
 
-        if (!currentTile) {
-            return;
-        }
+        return;
+    }
 
-        // check if this exact tile is already present at this location
-        const existing = tiles.find(t => t.x === x
-                                         && t.y === y
-                                         && t.atlas === curAtlas
-                                         && t.atlasX === currentTile!.x
-                                         && t.atlasY === currentTile!.y);
-        if (!existing) {
-            const tile = { x, y, atlasX: currentTile.x, atlasY: currentTile.y, atlas: curAtlas };
-            executeAction({ kind: 'add-tiles', tiles: [tile] });
-        }
+    if (!currentTiles) {
+        return;
+    }
+
+    // check if this exact tile is already present at this location
+    const existing = tiles.some(t => t.x === x
+                                  && t.y === y
+                                  && t.atlas === curAtlas
+                                  && currentTiles!.some(c => t.atlasY === c.x && t.atlasY === c.y));
+    if (!existing) {
+        const tiles = currentTiles.map<Tile>(t => ({
+            x: x + t.dx,
+            y: y + t.dy,
+            atlasX: t.x,
+            atlasY: t.y,
+            atlas: curAtlas
+        }));
+        executeAction({ kind: 'add-tiles', tiles });
     }
 }
 
@@ -368,20 +384,25 @@ function drawCursor() {
         ctx.drawImage(deleteIcon, mouseX - 16, mouseY - 16, 32, 32);
     }
 
-    if (currentTile && !deleteMode) {
+    if (currentTiles && !deleteMode) {
         const x = Math.floor(mouseX / gridSize) * gridSize;
         const y = Math.floor(mouseY / gridSize) * gridSize;
         const atlas = loadedAtlases[curAtlas]!;
 
+        const alpha = ctx.globalAlpha;
         ctx.globalAlpha = 0.75;
-        ctx.drawImage(atlas, currentTile.x * sliceSize, currentTile.y * sliceSize , sliceSize, sliceSize, x, y, gridSize, gridSize);
-        ctx.globalAlpha = 1;
+
+        for (const t of currentTiles) {
+            ctx.drawImage(atlas, t.x * sliceSize, t.y * sliceSize , sliceSize, sliceSize, x + t.dx * gridSize, y + t.dy * gridSize, gridSize, gridSize);
+        }
+        ctx.globalAlpha = alpha;
     }
 }
 
 function onEscape() {
     deleteMode = false;
-    currentTile = undefined;
+    currentTiles = undefined;
+    settings_multiselect = undefined;
 }
 
 function onMouseUp(e: Extract<VEvent, { kind: 'mouseup' }>) {
@@ -503,6 +524,20 @@ const deleteModeButton: Button = {
     }
 };
 
+const multiselectModeButton: Button = {
+    kind: 'button',
+    get style() {
+        return multiselectMode ? '.small-button-active' : '.small-button';
+    },
+    inner: {
+        kind: 'text',
+        text: 'MUL',
+    },
+    onClick: () => {
+        settings_multiselect = settings_multiselect ? undefined : true;
+    }
+};
+
 const undoButton: Button = {
     kind: 'button',
     style: '.small-button',
@@ -538,10 +573,11 @@ const settingsButton: Button = {
     }
 };
 
-const smallButtons = {
+const smallButtons: Record<typeof AllButtons[number], Button> = {
     gridSize: zoomButton,
     noRows: tileRowsButton,
     delMode: deleteModeButton,
+    multiselect: multiselectModeButton,
     undo: undoButton,
     redo: redoButton,
 };
@@ -713,7 +749,7 @@ function createAtlasList(): AutoContainer {
 
 function onAtlasButtonClick(path: string) {
     curAtlas = path;
-    currentTile = undefined;
+    currentTiles = undefined;
 
     regenerateUI();
 }
@@ -739,7 +775,7 @@ function createAtlasTiles(nRows: number): AutoContainer {
             kind: 'button',
 
             get style() {
-                return currentTile === data ? '.tile-active' : '.tile';
+                return currentTiles?.some(t => t.x === data.x && t.y === data.y) ? '.tile-active' : '.tile';
             },
 
             inner: {
@@ -789,11 +825,42 @@ function createAtlasTiles(nRows: number): AutoContainer {
     return container;
 }
 
-function onAtlasTileClick(data: typeof currentTile) {
+function onAtlasTileClick(data: { x: number, y: number }) {
     deleteMode = false;
-    currentTile = currentTile === data
-        ? undefined
-        : data;
+
+    if (!currentTiles || !multiselectMode) {
+        const existing = currentTiles?.some(t => t.x === data.x && t.y === data.y);
+
+        currentTiles = existing
+            ? undefined
+            : [ { x: data.x, y: data.y, dx: 0, dy: 0 } ];
+
+        return;
+    }
+
+    const idx = currentTiles.findIndex(t => t.x === data.x && t.y === data.y);
+    if (idx !== -1) {
+        currentTiles.splice(idx, 1);
+        currentTiles = currentTiles.length ? currentTiles : undefined;
+
+        return;
+    }
+
+    currentTiles.push({ x: data.x, y: data.y, dx: 0, dy: 0 });
+    const xySets = currentTiles
+        .reduce((acc, t) => {
+            acc.xs.add(t.x);
+            acc.ys.add(t.y);
+            return acc;
+        }, { xs: new Set<number>, ys: new Set<number> });
+
+    const xs = [ ... xySets.xs ].toSorted((x, y) => x - y);
+    const ys = [ ... xySets.ys ].toSorted((x, y) => x - y);
+
+    for (const t of currentTiles) {
+        t.dx = xs.indexOf(t.x);
+        t.dy = ys.indexOf(t.y);
+    }
 }
 
 function loadAtlases() {
