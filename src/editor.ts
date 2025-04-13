@@ -11,9 +11,11 @@ import {
 import { clamp, assertNever } from './util'
 import type { Shortcut } from './keyboard'
 import {
-    UI, Button, UIText, AutoContainer,
+    UI, Button, UIText, AutoContainer, UIStyle,
 
-    drawUI, handleScrollUI, handleClickUI, addStylesUI, addAtlasesUI, displayBoundingBoxes
+    drawUI, handleScrollUI, handleClickUI, addStylesUI, addAtlasesUI, displayBoundingBoxes, styles as compiledStyles,
+
+    isClickInside, isMouseInside
 } from './ui'
 
 
@@ -279,6 +281,11 @@ function beforeDraw() {
     handleMouseDraw();
 
     multiselectMode = settings_multiselect ?? !!pressedKeys.META;
+
+    if (dragging) {
+        (dragging.style as UIStyle).x = mouseX + draggingDx;
+        (dragging.style as UIStyle).y = mouseY + draggingDy;
+    }
 }
 
 function handleMouseDraw() {
@@ -406,6 +413,7 @@ function onEscape() {
 }
 
 function onMouseUp(e: Extract<VEvent, { kind: 'mouseup' }>) {
+    dragging = undefined;
     mouseDown = false;
     if (massHistoryStart !== undefined) {
         aggregateHistory(massHistoryStart, historyIndex);
@@ -421,7 +429,17 @@ function onMouseUp(e: Extract<VEvent, { kind: 'mouseup' }>) {
     }
 }
 
+let dragging: UI | undefined;
+let draggingDx: number;
+let draggingDy: number;
 function onMouseDown(e: Extract<VEvent, { kind: 'mousedown' }>) {
+    if (isClickInside(popUp)) {
+        dragging = popUp;
+        draggingDx = (popUp.style as UIStyle).x! - mouseX;
+        draggingDy = (popUp.style as UIStyle).y! - mouseY;
+        return;
+    }
+
     mouseDown = true;
 
     // can happen if the non-primary button is pressed
@@ -460,10 +478,11 @@ function regenerateUI() {
     }
 
     ui = settingsOpen
-        ? [ settingsContainer ]
+        ? [ settingsContainer, popUp ]
         : [
             createToolsContainer(),
             createAtlasTiles(tileRows),
+            popUp
         ];
 }
 
@@ -716,6 +735,100 @@ const settingsContainer: AutoContainer = {
         }
     ],
 };
+
+const popUp: AutoContainer = {
+    kind: 'auto-container',
+    id: 'pop-up',
+    mode: 'column',
+    children: [
+        {
+            kind: 'auto-container',
+            mode: 'row',
+            children: [
+                {
+                    kind: 'button',
+                    inner: {
+                        kind: 'text',
+                        text: '_',
+                    },
+                    onClick: () => { minimised = !minimised; }
+                },
+                {
+                    kind: 'button',
+                    inner: {
+                        kind: 'text',
+                        text: 'X',
+                    },
+                    onClick: () => {
+                        (popUp.style as UIStyle).display = 'none';
+                    }
+                }
+            ],
+            style: { w: 300, h: 30, borderW: 2, borderColor: 'grey', }
+        },
+        {
+            kind: 'auto-container',
+            mode: 'column',
+            get children() {
+                if (!selectedStyle) {
+                    return Object.getOwnPropertyNames(compiledStyles).map<UI>(st => {
+                        return {
+                            kind: 'button',
+                            id: 'btn-' + st,
+                            inner: { kind: 'text', text: st },
+                            onClick: () => { selectedStyle = st; }
+                        };
+                    });
+                }
+
+                return createSelectedStyleUI();
+            },
+            style: { get display() { return minimised ? 'none' : 'visible' } }
+        },
+    ],
+    style: { x: 100, y: 100, w: 300, borderW: 2, borderColor: 'grey', backgroundColor: 'black', scroll: 'y' },
+};
+let minimised = false;
+let selectedStyle: string | undefined;
+
+const width100 = { w: 100 };
+const backButton = { borderW: 1, borderColor: 'darkgray' };
+function createSelectedStyleUI(): UI[] {
+    const style = compiledStyles[selectedStyle!]!;
+    return [
+        ... Object.getOwnPropertyNames(style).map<UI>(name => {
+
+            const prefix =  'ac-' + selectedStyle + '-' + name;
+
+            return {
+                kind: 'auto-container',
+                id: prefix + '-row',
+                mode: 'row',
+                children: [
+                    {
+                        kind: 'text',
+                        id: prefix + '-label',
+                        text: name + ':',
+                        style: width100
+                    },
+                    {
+                        kind: 'text',
+                        id: prefix + '-value',
+                        text: String(style[name as keyof UIStyle])
+                    }
+                ]
+            };
+        }),
+
+        {
+            kind: 'button',
+            id: 'back-btn',
+            inner: { kind: 'text', text: 'Back' },
+            style: backButton,
+            onClick: () => { selectedStyle = undefined; },
+        }
+    ];
+}
 
 function createAtlasList(): AutoContainer {
     const list = atlasPaths.map(path => {

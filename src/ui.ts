@@ -55,6 +55,8 @@ export type UIStyle = {
     textVAlign?: 'top' | 'center' | 'bottom',
     borderW?: number | string,
     borderColor?: string,
+    backgroundColor?: string | undefined,
+    display?: 'none' | 'hidden' | 'visible',
 
     gap?: number,
     scroll?: 'x' | 'y' | undefined,
@@ -87,6 +89,9 @@ type LayoutData = {
     textVAlign: 'top' | 'center' | 'bottom',
     borderW: number | string,
     borderColor: string,
+    backgroundColor: string | undefined,
+    display: 'none' | 'hidden' | 'visible',
+
     gap: number,
 }
 
@@ -111,11 +116,13 @@ const defaultStyle: Required<UIStyle> = {
     textVAlign: 'center',
     borderW: 0,
     borderColor: 'aqua',
+    backgroundColor: undefined,
+    display: 'visible',
     gap: 0,
     scroll: undefined,
 };
 
-const styles: ReturnType<typeof compileStyle<UIStyle>> = {};
+export const styles: ReturnType<typeof compileStyle<UIStyle>> = {};
 const layoutDataCache: { [id: string]: { style: UI['style'], layout: LayoutData } } = {};
 const loadedAtlases: { [k: string]: HTMLImageElement } = {};
 const idMap = new WeakMap<UI, string>();
@@ -154,6 +161,11 @@ function layoutDraw(ui: UI[]) {
 
 function calcBoxes(ui: UI[]) {
     for (const o of ui) {
+        const ld = getOrCreateLayout(o);
+        if (ld.display === 'none') {
+            continue;
+        }
+
         switch (o.kind) {
             case 'button':         calcButtonBox(o);        break;
             case 'text':           calcTextBox(o);          break;
@@ -201,7 +213,7 @@ function calcTextBox(o: UIText) {
         ld.w = dims.width;
     }
     if (ld.style?.h === undefined) {
-        ld.h = dims.actualBoundingBoxDescent;
+        ld.h = dims.fontBoundingBoxDescent;
     }
 }
 
@@ -212,11 +224,23 @@ function calcAutoContainerBox(o: AutoContainer) {
     calcBoxes(o.children);
 
     ld.scrollHeight = o.mode === 'row'
-        ? o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).h), 0)
-        : o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h + ld.gap, 0) + (o.children.length > 0 ? -ld.gap : 0);
+        ? o.children.reduce((acc, x) => {
+            const cl = getOrCreateLayout(x);
+            return cl.display === 'none' ? acc : Math.max(acc, cl.h);
+        }, 0)
+        : o.children.reduce((acc, x) => {
+            const cl = getOrCreateLayout(x);
+            return cl.display === 'none' ? acc : acc + cl.h + (acc ? ld.gap : 0);
+        }, 0);
     ld.scrollWidth = o.mode === 'row'
-        ? o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w + ld.gap, 0) + (o.children.length > 0 ? -ld.gap : 0)
-        : o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).w), 0);
+        ? o.children.reduce((acc, x) => {
+            const cl = getOrCreateLayout(x);
+            return cl.display === 'none' ? acc : acc + cl.w + (acc ? ld.gap : 0);
+        }, 0)
+        : o.children.reduce((acc, x) => {
+            const cl = getOrCreateLayout(x);
+            return cl.display === 'none' ? acc : Math.max(acc, cl.w);
+        }, 0);
 
     ld.scrollX = clamp(ld.scrollX, Math.min(ld.w, ld.scrollWidth) - ld.scrollWidth, 0);
     ld.scrollY = clamp(ld.scrollY, Math.min(ld.h, ld.scrollHeight) - ld.scrollHeight, 0);
@@ -242,6 +266,11 @@ function calcAutoContainerBox(o: AutoContainer) {
 
 function layout(ui: UI[]) {
     for (const o of ui) {
+        const ld = getOrCreateLayout(o);
+        if (ld.display === 'none') {
+            continue;
+        }
+
         switch (o.kind) {
             case 'button':
             case 'text':           break;
@@ -275,6 +304,11 @@ function layoutAutoContainer(o: AutoContainer) {
 
 function drawUI(ui: UI[]) {
     for (const o of ui) {
+        const ld = getOrCreateLayout(o);
+        if (ld.display !== 'visible') {
+            continue;
+        }
+
         switch (o.kind) {
             case 'text': drawText(o); break;
             case 'button': drawButton(o); break;
@@ -415,6 +449,11 @@ function drawAutoContainer(o: AutoContainer) {
         ctx.clip();
     }
 
+    if (ld.backgroundColor) {
+        ctx.fillStyle = ld.backgroundColor;
+        ctx.fillRect(ld.x, ld.y, ld.w, ld.h);
+    }
+
     drawUI(o.children);
     if (clip) {
         ctx.restore();
@@ -484,15 +523,17 @@ function createLayoutData(style: UIStyle | undefined): LayoutData {
         scrollWidth: 0,
 
         // Accessors
-        get maxWidth()    { return style?.maxWidth    || defaultStyle.maxWidth;    },
-        get maxHeight()   { return style?.maxHeight   || defaultStyle.maxHeight;   },
-        get color()       { return style?.color       || defaultStyle.color;       },
-        get font()        { return style?.font        || defaultStyle.font;        },
-        get textAlign()   { return style?.textAlign   || defaultStyle.textAlign;   },
-        get textVAlign()  { return style?.textVAlign  || defaultStyle.textVAlign;  },
-        get borderW()     { return style?.borderW     || defaultStyle.borderW;     },
-        get borderColor() { return style?.borderColor || defaultStyle.borderColor; },
-        get gap()         { return style?.gap         || defaultStyle.gap;         },
+        get maxWidth()        { return style?.maxWidth        || defaultStyle.maxWidth;        },
+        get maxHeight()       { return style?.maxHeight       || defaultStyle.maxHeight;       },
+        get color()           { return style?.color           || defaultStyle.color;           },
+        get font()            { return style?.font            || defaultStyle.font;            },
+        get textAlign()       { return style?.textAlign       || defaultStyle.textAlign;       },
+        get textVAlign()      { return style?.textVAlign      || defaultStyle.textVAlign;      },
+        get borderW()         { return style?.borderW         || defaultStyle.borderW;         },
+        get borderColor()     { return style?.borderColor     || defaultStyle.borderColor;     },
+        get backgroundColor() { return style?.backgroundColor || defaultStyle.backgroundColor; },
+        get display()         { return style?.display         || defaultStyle.display          },
+        get gap()             { return style?.gap             || defaultStyle.gap;             },
     };
 
     return res;
@@ -532,13 +573,22 @@ export function handleClickUI(ui: UI[]): boolean {
     return false;
 }
 
-function isClickInside(o: UI) {
+export function isClickInside(o: UI) {
     const ld = getOrCreateLayout(o);
 
     // for a click to be valid, both the initial touch down and the current position need
     // to be inside the element
-    return clickX! >= ld.x && clickX! <= ld.x + ld.w
+    return ld.display !== 'none'
+        && clickX! >= ld.x && clickX! <= ld.x + ld.w
         && clickY! >= ld.y && clickY! <= ld.y + ld.h
+        && mouseX >= ld.x && mouseX <= ld.x + ld.w
+        && mouseY >= ld.y && mouseY <= ld.y + ld.h;
+}
+
+export function isMouseInside(o: UI) {
+    const ld = getOrCreateLayout(o);
+
+    return ld.display !== 'none'
         && mouseX >= ld.x && mouseX <= ld.x + ld.w
         && mouseY >= ld.y && mouseY <= ld.y + ld.h;
 }
@@ -547,13 +597,15 @@ function isScrollInside(o: UI, isWheel: boolean) {
     const ld = getOrCreateLayout(o);
 
     if (isWheel) {
-        return mouseX >= ld.x && mouseX <= ld.x + ld.w
+        return ld.display !== 'none'
+            && mouseX >= ld.x && mouseX <= ld.x + ld.w
             && mouseY >= ld.y && mouseY <= ld.y + ld.h;
     }
 
     // touch devices: scroll should work for the element where the tap was initiated
     // even if the current position of the pointer is outside the scrolled element
-    return clickX! >= ld.x && clickX! <= ld.x + ld.w
+    return ld.display !== 'none'
+        && clickX! >= ld.x && clickX! <= ld.x + ld.w
         && clickY! >= ld.y && clickY! <= ld.y + ld.h;
 }
 
