@@ -11,11 +11,11 @@ import {
 import { clamp, assertNever } from './util'
 import type { Shortcut } from './keyboard'
 import {
-    UI, Button, UIText, AutoContainer, UIStyle,
+    UI, Button, UIText, UIContainer, UIStyle,
 
     drawUI, handleScrollUI, handleClickUI, addStylesUI, addAtlasesUI, displayBoundingBoxes, styles as compiledStyles,
 
-    isClickInside, isMouseInside
+    isClickInside
 } from './ui'
 
 
@@ -101,11 +101,11 @@ let currentTiles: SelectedTile[] | undefined;
 let ui: UI[] = [];
 
 const styleContext = {
-    get height() {
+    get screenHeight() {
         return height;
     },
 
-    get width() {
+    get screenWidth() {
         return width;
     },
 
@@ -125,49 +125,52 @@ const styleContext = {
 const styles = `
 
     .settings-container {
-        x: 5;
-        y: toolsOffset + 20;
-        w: width - 10;
-        h: height - toolsOffset - 30;
+        top: toolsOffset + 20;
+        left: 5;
+        width: screenWidth - 10;
+        height: screenHeight - toolsOffset - 30;
         gap: 15;
         scroll: 'y';
+        layoutMode: 'column';
     }
 
     #tiles-container {
-        x: 5;
-        y: toolsOffset + 10;
-        w: smallScreen ? width - 140 : width - 215;
-        h: height - toolsOffset - 10;
+        top: toolsOffset + 10;
+        left: 5;
+        width: smallScreen ? screenWidth - 140 : screenWidth - 215;
+        height: screenHeight - toolsOffset - 10;
         gap: 5;
+        layoutMode: 'row';
 
         scroll: 'x';
     }
 
     .tile {
-        w: toolSize;
-        h: toolSize;
+        width: toolSize;
+        height: toolSize;
     }
 
     .tile-active {
         ... .tile;
         borderColor: '#cc0909';
-        borderW: 2;
+        borderWidth: 2;
     }
 
     #tools-container {
-        x: smallScreen ? width - 125 : width - 200;
-        y: toolsOffset + 10;
+        top: toolsOffset + 10;
+        left: smallScreen ? screenWidth - 125 : screenWidth - 200;
         gap: 5;
+        layoutMode: 'row';
     }
 
     .small-button {
-        w: smallScreen ? 30 : 45;
-        h: smallScreen ? 14 : 21;
+        width: smallScreen ? 30 : 45;
+        height: smallScreen ? 14 : 21;
         color: 'darkgray';
         font: smallScreen ? '9px monospace' : '14px monospace';
-        borderW: 1;
+        borderWidth: 1;
         borderColor: 'darkgray';
-        textAlign: 'center';
+        align: 'center';
     }
 
     .small-button-active {
@@ -177,21 +180,22 @@ const styles = `
     }
 
     #atlas-list-container {
-        maxHeight: height - toolsOffset - 10 - (smallScreen ? 4 : 3);
+        maxHeight: screenHeight - toolsOffset - 10 - (smallScreen ? 4 : 3);
 
-        borderW: 1;
+        borderWidth: 1;
         borderColor: 'darkgray';
         scroll: 'y';
+        layoutMode: 'column';
     }
 
     .atlas-list-button {
-        w: smallScreen ? 89 : 149;
-        h: smallScreen ? 12 : 21;
-        borderW: 1;
+        width: smallScreen ? 89 : 149;
+        height: smallScreen ? 12 : 21;
+        borderWidth: 1;
         borderColor: 'darkgray';
         font: smallScreen ? '9px monospace' : '14px monospace';
         color: 'darkgray';
-        textAlign: 'right';
+        align: 'right';
     }
 
     .atlas-list-button-active {
@@ -199,31 +203,37 @@ const styles = `
         color: 'floralwhite';
     }
 
-    .gap5 {
+    .gap5-row {
         gap: 5;
+        layoutMode: 'row';
+    }
+
+    .gap5-column {
+        gap: 5;
+        layoutMode: 'column';
     }
 
     .settings-label {
         color: 'floralwhite';
         font: '16px monospace';
-        h: 21;
-        w: 150;
+        height: 21;
+        width: 150;
     }
 
     .checkbox {
-        borderW: 2;
+        borderWidth: 2;
         borderColor: 'grey';
         color: 'floralwhite';
         font: '16px monospace';
-        textAlign: 'center';
-        w: 20;
-        h: 20;
+        align: 'center';
+        width: 20;
+        height: 20;
     }
 
     .checkbox-label {
         color: 'darkgray';
         font: '14px monospace';
-        h: 21;
+        height: 21;
     }
 
     .checkbox-label-active {
@@ -283,8 +293,8 @@ function beforeDraw() {
     multiselectMode = settings_multiselect ?? !!pressedKeys.META;
 
     if (dragging) {
-        (dragging.style as UIStyle).x = mouseX + draggingDx;
-        (dragging.style as UIStyle).y = mouseY + draggingDy;
+        (dragging.style as UIStyle).left = mouseX + draggingDx;
+        (dragging.style as UIStyle).top = mouseY + draggingDy;
     }
 }
 
@@ -435,8 +445,8 @@ let draggingDy: number;
 function onMouseDown(e: Extract<VEvent, { kind: 'mousedown' }>) {
     if (isClickInside(popUp)) {
         dragging = popUp;
-        draggingDx = (popUp.style as UIStyle).x! - mouseX;
-        draggingDy = (popUp.style as UIStyle).y! - mouseY;
+        draggingDx = (popUp.style as UIStyle).left! - mouseX;
+        draggingDy = (popUp.style as UIStyle).top! - mouseY;
         return;
     }
 
@@ -487,9 +497,8 @@ function regenerateUI() {
 }
 
 function createToolsContainer() {
-    const container: AutoContainer = {
-        kind: 'auto-container',
-        mode: 'row',
+    const container: UIContainer = {
+        kind: 'container',
         children: [ createSmallTools(), createAtlasList() ],
         style: '#tools-container',
     };
@@ -601,10 +610,9 @@ const smallButtons: Record<typeof AllButtons[number], Button> = {
     redo: redoButton,
 };
 
-function createSmallTools(): AutoContainer {
+function createSmallTools(): UIContainer {
     return {
-        kind: 'auto-container',
-        mode: 'column',
+        kind: 'container',
         children: [
             ... AllButtons.flatMap(btn => settings_buttons.has(btn) ? [ smallButtons[btn] ] : []),
             settingsButton
@@ -612,14 +620,15 @@ function createSmallTools(): AutoContainer {
         style: {
             gap: 5,
             scroll: 'y',
-            get maxHeight() { return height - toolsOffset - 20; }
+            get maxHeight() { return height - toolsOffset - 20; },
+            layoutMode: 'column'
         },
     };
 };
 
-const toolSizeRow: AutoContainer = {
-    kind: 'auto-container',
-    mode: 'row',
+const toolSizeRow: UIContainer = {
+    kind: 'container',
+    style: { layoutMode: 'row' },
     children: [
         {
             kind: 'text',
@@ -627,9 +636,8 @@ const toolSizeRow: AutoContainer = {
             style: '.settings-label'
         },
         {
-            kind: 'auto-container',
-            mode: 'row',
-            style: 'gap5',
+            kind: 'container',
+            style: { layoutMode: 'row' },
             children: [
                 {
                     kind: 'button',
@@ -665,9 +673,9 @@ const toolSizeRow: AutoContainer = {
     ],
 };
 
-const availableButtons: AutoContainer = {
-    kind: 'auto-container',
-    mode: 'row',
+const availableButtons: UIContainer = {
+    kind: 'container',
+    style: { layoutMode: 'row' },
     children: [
         {
             kind: 'text',
@@ -675,9 +683,8 @@ const availableButtons: AutoContainer = {
             style: '.settings-label'
         },
         {
-            kind: 'auto-container',
-            mode: 'row',
-            style: { gap: 20 },
+            kind: 'container',
+            style: { gap: 20, layoutMode: 'row' },
             children: AllButtons.map<UI>(btn => {
                 const checkbox: Button = {
                     kind: 'button',
@@ -706,9 +713,8 @@ const availableButtons: AutoContainer = {
                 };
 
                 return {
-                    kind: 'auto-container',
-                    mode: 'row',
-                    style: { gap: 8 },
+                    kind: 'container',
+                    style: { gap: 8, layoutMode: 'row' },
                     children: [ checkbox, label ],
                 };
             }),
@@ -716,9 +722,8 @@ const availableButtons: AutoContainer = {
     ],
 };
 
-const settingsContainer: AutoContainer = {
-    kind: 'auto-container',
-    mode: 'column',
+const settingsContainer: UIContainer = {
+    kind: 'container',
     style: '.settings-container',
     children: [
         toolSizeRow,
@@ -730,20 +735,18 @@ const settingsContainer: AutoContainer = {
                 kind: 'text',
                 text: 'Close',
             },
-            style: { borderW: 1, borderColor: 'darkgray', color: 'darkgray' },
+            style: { borderWidth: 1, borderColor: 'darkgray', color: 'darkgray' },
             onClick: () => { settingsOpen = false, regenerateUI(); }
         }
     ],
 };
 
-const popUp: AutoContainer = {
-    kind: 'auto-container',
+const popUp: UIContainer = {
+    kind: 'container',
     id: 'pop-up',
-    mode: 'column',
     children: [
         {
-            kind: 'auto-container',
-            mode: 'row',
+            kind: 'container',
             children: [
                 {
                     kind: 'button',
@@ -764,11 +767,10 @@ const popUp: AutoContainer = {
                     }
                 }
             ],
-            style: { w: 300, h: 30, borderW: 2, borderColor: 'grey', }
+            style: { width: 300, height: 30, borderWidth: 2, borderColor: 'grey', layoutMode: 'row' }
         },
         {
-            kind: 'auto-container',
-            mode: 'column',
+            kind: 'container',
             get children() {
                 if (!selectedStyle) {
                     return Object.getOwnPropertyNames(compiledStyles).map<UI>(st => {
@@ -776,23 +778,27 @@ const popUp: AutoContainer = {
                             kind: 'button',
                             id: 'btn-' + st,
                             inner: { kind: 'text', text: st },
-                            onClick: () => { selectedStyle = st; }
+                            onClick: () => {
+                                selectedStyle = st;
+                                selectedStyleChildren = createSelectedStyleUI();
+                            }
                         };
                     });
                 }
 
-                return createSelectedStyleUI();
+                return selectedStyleChildren!;
             },
-            style: { get display() { return minimised ? 'none' : 'visible' } }
+            style: { layoutMode: 'column', get display() { return minimised ? 'none' : 'visible' } }
         },
     ],
-    style: { x: 100, y: 100, w: 300, borderW: 2, borderColor: 'grey', backgroundColor: 'black', scroll: 'y' },
+    style: { top: 100, left: 100, width: 300, borderWidth: 2, borderColor: 'grey', backgroundColor: 'black', scroll: 'y', layoutMode: 'column', },
 };
 let minimised = false;
 let selectedStyle: string | undefined;
+let selectedStyleChildren: UI[] | undefined;
 
-const width100 = { w: 100 };
-const backButton = { borderW: 1, borderColor: 'darkgray' };
+const width100: UIStyle = { width: 100 };
+const backButton: UIStyle = { borderWidth: 1, borderColor: 'darkgray' };
 function createSelectedStyleUI(): UI[] {
     const style = compiledStyles[selectedStyle!]!;
     return [
@@ -801,9 +807,9 @@ function createSelectedStyleUI(): UI[] {
             const prefix =  'ac-' + selectedStyle + '-' + name;
 
             return {
-                kind: 'auto-container',
+                kind: 'container',
                 id: prefix + '-row',
-                mode: 'row',
+                style: { layoutMode: 'row' },
                 children: [
                     {
                         kind: 'text',
@@ -825,12 +831,15 @@ function createSelectedStyleUI(): UI[] {
             id: 'back-btn',
             inner: { kind: 'text', text: 'Back' },
             style: backButton,
-            onClick: () => { selectedStyle = undefined; },
+            onClick: () => {
+                selectedStyle = undefined;
+                selectedStyleChildren = undefined;
+            },
         }
     ];
 }
 
-function createAtlasList(): AutoContainer {
+function createAtlasList(): UIContainer {
     const list = atlasPaths.map(path => {
         const text = path
             .replace('img/', '')
@@ -850,9 +859,8 @@ function createAtlasList(): AutoContainer {
         return button;
     });
 
-    const container: AutoContainer = {
-        kind: 'auto-container',
-        mode: 'column',
+    const container: UIContainer = {
+        kind: 'container',
         children: list,
         style: '#atlas-list-container',
     };
@@ -867,7 +875,7 @@ function onAtlasButtonClick(path: string) {
     regenerateUI();
 }
 
-function createAtlasTiles(nRows: number): AutoContainer {
+function createAtlasTiles(nRows: number): UIContainer {
 
     const atlas = loadedAtlases[curAtlas]!;
 
@@ -904,11 +912,10 @@ function createAtlasTiles(nRows: number): AutoContainer {
 
         currRow.push(btn);
         if (i % ac === ac - 1) {
-            const container: AutoContainer = {
-                kind: 'auto-container',
-                mode: 'row',
+            const container: UIContainer = {
+                kind: 'container',
                 children: currRow,
-                style: '.gap5',
+                style: '.gap5-row',
             };
 
             rows.push(container);
@@ -916,11 +923,10 @@ function createAtlasTiles(nRows: number): AutoContainer {
         }
 
         if (rows.length === nRows || i === count - 1) {
-            const container: AutoContainer = {
-                kind: 'auto-container',
-                mode: 'column',
+            const container: UIContainer = {
+                kind: 'container',
                 children: rows,
-                style: '.gap5',
+                style: '.gap5-column',
             };
 
             cols.push(container);
@@ -928,9 +934,8 @@ function createAtlasTiles(nRows: number): AutoContainer {
         }
     }
 
-    const container: AutoContainer = {
-        kind: 'auto-container',
-        mode: 'row',
+    const container: UIContainer = {
+        kind: 'container',
         children: cols,
         style: '#tiles-container',
     };

@@ -8,70 +8,87 @@ import { compileStyle } from './mini-css'
 
 import { uuid, clamp, assertNever } from './util'
 
+export type UI = UIText
+               | UIImage
+               | UIButton
+               | UIContainer
 
-export type UI = Button
-               | AutoContainer
-               | UIText
-
-export type ImageSlice = { kind: 'image', src: string, dx: number, dy: number, w: number, h: number }
-export type TextProps  = { kind: 'text', text: string }
-
-export type Button = {
-    kind: 'button',
+export type UIContainer = {
+    kind: 'container',
     id?: string,
     style?: string | UIStyle,
-    inner: ImageSlice | TextProps,
-    onClick: (self: Button) => void,
-}
-
-export type AutoContainer = {
-    kind: 'auto-container',
-    id?: string,
-    mode: 'column' | 'row',
     children: UI[],
-    style?: string | UIStyle,
 }
 
 export type UIText = {
     kind: 'text',
     id?: string,
-    text: string,
     style?: string | UIStyle,
+    text: string,
+}
+
+export type UIImage = {
+    kind: 'image',
+    id?: string,
+    style?: string | UIStyle,
+    src: string,
+    x?: number,
+    y?: number,
+    width?: number,
+    height?: number
 }
 
 export type UIStyle = {
-    x?: number,
-    y?: number,
+    top?: number,
+    left?: number,
 
-    w?: number,
-    h?: number,
+    width?: number,
+    height?: number,
 
     maxWidth?: number | undefined,
     maxHeight?: number | undefined,
 
     color?: string,
     font?: string,
-    textAlign?: 'left' | 'right' | 'center',
-    textVAlign?: 'top' | 'center' | 'bottom',
-    borderW?: number | string,
+    align?: 'left' | 'right' | 'center',
+    verticalAlign?: 'top' | 'center' | 'bottom',
+
+    borderWidth?: number | string,
     borderColor?: string,
+
     backgroundColor?: string | undefined,
     display?: 'none' | 'hidden' | 'visible',
 
-    gap?: number,
+    margin?: number | string,
+    padding?: number | string,
+
+    gap?: number | string,
+    layoutMode?: 'column' | 'row',
     scroll?: 'x' | 'y' | undefined,
+}
+
+export type ImageSlice = { kind: 'image', src: string, dx: number, dy: number, w: number, h: number }
+export type TextProps  = { kind: 'text', text: string }
+
+export { UIButton as Button }
+export type UIButton = {
+    kind: 'button',
+    id?: string,
+    style?: string | UIStyle,
+    inner: ImageSlice | TextProps,
+    onClick: (self: UIButton) => void,
 }
 
 type LayoutData = {
     style: UIStyle | undefined,
 
-    x: number,
-    y: number,
-
-    w: number,
-    h: number,
+    $x: number,
+    $y: number,
+    $w: number,
+    $h: number,
 
     textMetrics: TextMetrics | undefined,
+    imageDimensions: { width: number, height: number } | undefined,
 
     scroll: 'x' | 'y' | undefined,
     scrollX: number,
@@ -85,47 +102,59 @@ type LayoutData = {
 
     color: string,
     font: string,
-    textAlign: 'left' | 'right' | 'center',
-    textVAlign: 'top' | 'center' | 'bottom',
-    borderW: number | string,
+    align: 'left' | 'right' | 'center',
+    verticalAlign: 'top' | 'center' | 'bottom',
+
+    borderWidth: TRBL,
     borderColor: string,
+
     backgroundColor: string | undefined,
     display: 'none' | 'hidden' | 'visible',
 
-    gap: number,
+    margin:  TRBL,
+    padding: TRBL,
+
+    gap: { row: number, column: number },
+    layoutMode: 'column' | 'row',
 }
 
-type LayoutPrivate = {
-    $x: number | undefined,
-    $y: number | undefined,
+type TRBL = { top: number, right: number, bottom: number, left: number }
 
-    $w: number | undefined,
-    $h: number | undefined,
-}
+type OmitOwn<T, K extends keyof T> = Pick<T, Exclude<keyof T, K>>;
 
-const defaultStyle: Required<UIStyle> = {
-    x: 0,
-    y: 0,
-    w: 0,
-    h: 0,
+const defaultStyle: Required<OmitOwn<UIStyle, 'width' | 'height'>> = {
+    top: 0,
+    left: 0,
     maxWidth: undefined,
     maxHeight: undefined,
+
     color: 'aqua',
     font: '12px monospace',
-    textAlign: 'left',
-    textVAlign: 'center',
-    borderW: 0,
+    align: 'left',
+    verticalAlign: 'top',
+
+    borderWidth: 0,
     borderColor: 'aqua',
+
     backgroundColor: undefined,
     display: 'visible',
+
+    margin: 0,
+    padding: 0,
+
+    layoutMode: 'column',
+
     gap: 0,
     scroll: undefined,
 };
 
+
 export const styles: ReturnType<typeof compileStyle<UIStyle>> = {};
-const layoutDataCache: { [id: string]: { style: UI['style'], layout: LayoutData } } = {};
+
 const loadedAtlases: { [k: string]: HTMLImageElement } = {};
+
 const idMap = new WeakMap<UI, string>();
+const layoutCache = new Map<string, { style: UI['style'], layout: LayoutData }>();
 
 let displayBoundingBoxes = false;
 
@@ -167,37 +196,12 @@ function calcBoxes(ui: UI[]) {
         }
 
         switch (o.kind) {
-            case 'button':         calcButtonBox(o);        break;
-            case 'text':           calcTextBox(o);          break;
-            case 'auto-container': calcAutoContainerBox(o); break;
+            case 'text':      calcTextBox(o);      break;
+            case 'image':     calcImageBox(o);     break;
+            case 'button':    calcButtonBox(o);    break;
+            case 'container': calcContainerBox(o); break;
 
             default: assertNever(o);
-        }
-    }
-}
-
-function calcButtonBox(o: Button) {
-    const ld = getOrCreateLayout(o);
-
-    if (o.inner.kind === 'text') {
-        ctx.font = ld.font;
-        const dims = ctx.measureText(o.inner.text);
-
-        ld.textMetrics = dims;
-        if (ld.style?.w === undefined) {
-            ld.w = dims.width + 10;
-        }
-        if (ld.style?.h === undefined) {
-            ld.h = dims.actualBoundingBoxDescent + 10;
-        }
-    }
-
-    if (o.inner.kind === 'image') {
-        if (ld.style?.w === undefined) {
-            ld.w = o.inner.w;
-        }
-        if (ld.style?.h === undefined) {
-            ld.h = o.inner.h;
         }
     }
 }
@@ -206,63 +210,81 @@ function calcTextBox(o: UIText) {
     const ld = getOrCreateLayout(o);
 
     ctx.font = ld.font;
-    const dims = ctx.measureText(o.text);
 
+    const dims = ctx.measureText(o.text);
     ld.textMetrics = dims;
-    if (ld.style?.w === undefined) {
-        ld.w = dims.width;
-    }
-    if (ld.style?.h === undefined) {
-        ld.h = dims.fontBoundingBoxDescent;
-    }
+    ld.$w = ld.style?.width ?? (dims.width + ld.padding.left + ld.padding.right);
+    ld.$h = ld.style?.height ?? (dims.fontBoundingBoxDescent + ld.padding.top + ld.padding.bottom);
 }
 
-function calcAutoContainerBox(o: AutoContainer) {
+function calcImageBox(o: UIImage) {
+    const ld = getOrCreateLayout(o);
+    const img = loadedAtlases[o.src];
+
+    ld.imageDimensions = img
+        ? { width: img.naturalWidth, height: img.naturalHeight }
+        : { width: 0, height: 0 };
+
+    ld.$w = ld.style?.width ?? ((o.width ?? ld.imageDimensions.width) + ld.padding.left + ld.padding.right);
+    ld.$h = ld.style?.height ?? ((o.height ?? ld.imageDimensions.height) + ld.padding.top + ld.padding.bottom);
+}
+
+function calcButtonBox(o: UIButton) {
     const ld = getOrCreateLayout(o);
 
-    // first, layout its children to obtain accurate (w,h)
-    calcBoxes(o.children);
+    if (o.inner.kind === 'text') {
+        ctx.font = ld.font;
+        const dims = ctx.measureText(o.inner.text);
 
-    ld.scrollHeight = o.mode === 'row'
-        ? o.children.reduce((acc, x) => {
-            const cl = getOrCreateLayout(x);
-            return cl.display === 'none' ? acc : Math.max(acc, cl.h);
-        }, 0)
-        : o.children.reduce((acc, x) => {
-            const cl = getOrCreateLayout(x);
-            return cl.display === 'none' ? acc : acc + cl.h + (acc ? ld.gap : 0);
-        }, 0);
-    ld.scrollWidth = o.mode === 'row'
-        ? o.children.reduce((acc, x) => {
-            const cl = getOrCreateLayout(x);
-            return cl.display === 'none' ? acc : acc + cl.w + (acc ? ld.gap : 0);
-        }, 0)
-        : o.children.reduce((acc, x) => {
-            const cl = getOrCreateLayout(x);
-            return cl.display === 'none' ? acc : Math.max(acc, cl.w);
-        }, 0);
-
-    ld.scrollX = clamp(ld.scrollX, Math.min(ld.w, ld.scrollWidth) - ld.scrollWidth, 0);
-    ld.scrollY = clamp(ld.scrollY, Math.min(ld.h, ld.scrollHeight) - ld.scrollHeight, 0);
-
-    if (ld.style?.h === undefined) {
-        ld.h = ld.scrollHeight;
-    }
-    if (ld.style?.w === undefined) {
-        ld.w = ld.scrollWidth;
+        ld.textMetrics = dims;
+        ld.$w = ld.style?.width ?? (dims.width + ld.padding.left + ld.padding.right + 10);
+        ld.$h = ld.style?.height ?? (dims.actualBoundingBoxDescent + ld.padding.top + ld.padding.bottom + 10);
     }
 
-    const maxHeight = ld.style?.maxHeight;
-    if (maxHeight) {
-        ld.h = Math.min(maxHeight, ld.scrollHeight);
-    }
-
-    const maxWidth = ld.style?.maxWidth;
-    if (maxWidth) {
-        ld.w = Math.min(maxWidth, ld.scrollWidth);
+    if (o.inner.kind === 'image') {
+        ld.$w = ld.style?.width ?? (o.inner.w + ld.padding.left + ld.padding.right);
+        ld.$h = ld.style?.width ?? (o.inner.h + ld.padding.top + ld.padding.bottom);
     }
 }
 
+function calcContainerBox(o: UIContainer) {
+    const ld = getOrCreateLayout(o);
+
+    // first, layout its children to obtain accurate ($w,$h)
+    calcBoxes(o.children);
+
+    ld.scrollHeight = ld.layoutMode === 'row'
+        ? o.children.reduce((acc, x) => {
+            const cl = getOrCreateLayout(x);
+            return cl.display === 'none' ? acc : Math.max(acc, cl.$h);
+        }, 0)
+        : o.children.reduce((acc, x) => {
+            const cl = getOrCreateLayout(x);
+            return cl.display === 'none' ? acc : acc + cl.$h + (acc ? ld.gap.row : 0);
+        }, 0);
+
+    ld.scrollWidth = ld.layoutMode === 'row'
+        ? o.children.reduce((acc, x) => {
+            const cl = getOrCreateLayout(x);
+            return cl.display === 'none' ? acc : acc + cl.$w + (acc ? ld.gap.column : 0);
+        }, 0)
+        : o.children.reduce((acc, x) => {
+            const cl = getOrCreateLayout(x);
+            return cl.display === 'none' ? acc : Math.max(acc, cl.$w);
+        }, 0);
+
+    ld.$w = Math.min(
+        ld.style?.width ?? (ld.scrollWidth + ld.padding.left + ld.padding.right),
+        ld.style?.maxWidth ?? Infinity
+    );
+    ld.$h = Math.min(
+        ld.style?.height ?? (ld.scrollHeight + ld.padding.top + ld.padding.bottom),
+        ld.style?.maxHeight ?? Infinity
+    );
+
+    ld.scrollX = clamp(ld.scrollX, Math.min(ld.$w, ld.scrollWidth) - ld.scrollWidth, 0);
+    ld.scrollY = clamp(ld.scrollY, Math.min(ld.$h, ld.scrollHeight) - ld.scrollHeight, 0);
+}
 
 function layout(ui: UI[]) {
     for (const o of ui) {
@@ -272,30 +294,35 @@ function layout(ui: UI[]) {
         }
 
         switch (o.kind) {
-            case 'button':
-            case 'text':           break;
-            case 'auto-container': layoutAutoContainer(o); break;
+            case 'text':      break;
+            case 'image':     break;
+            case 'button':    break;
+            case 'container': layoutContainer(o); break;
 
             default: assertNever(o);
         }
     }
 }
 
-function layoutAutoContainer(o: AutoContainer) {
+function layoutContainer(o: UIContainer) {
     const ld = getOrCreateLayout(o);
 
-    let dy = 0;
-    let dx = 0;
+    // TODO: fix `ld.$x` and `ld.$y` for parent;
+    // currently handled by `LayoutData` haxy
+
+    let dx = ld.$x + ld.padding.left + ld.scrollX;
+    let dy = ld.$y + ld.padding.top + ld.scrollY;
+
     for (const c of o.children) {
         const childLd = getOrCreateLayout(c);
 
-        childLd.x = ld.x + dx + ld.scrollX;
-        childLd.y = ld.y + dy + ld.scrollY;
+        childLd.$x = dx + childLd.margin.left;
+        childLd.$y = dy + childLd.margin.top;
 
-        if (o.mode === 'column') {
-            dy += childLd.h + ld.gap;
+        if (ld.layoutMode === 'row') {
+            dx += childLd.$w + childLd.margin.left + childLd.margin.right + ld.gap.column;
         } else {
-            dx += childLd.w + ld.gap;
+            dy += childLd.$h + childLd.margin.top + childLd.margin.bottom + ld.gap.row;
         }
     }
 
@@ -310,9 +337,10 @@ function drawUI(ui: UI[]) {
         }
 
         switch (o.kind) {
-            case 'text': drawText(o); break;
-            case 'button': drawButton(o); break;
-            case 'auto-container': drawAutoContainer(o); break;
+            case 'text':      drawText(o);      break;
+            case 'image':     drawImage(o);     break;
+            case 'button':    drawButton(o);    break;
+            case 'container': drawContainer(o); break;
 
             default: assertNever(o);
         }
@@ -322,21 +350,35 @@ function drawUI(ui: UI[]) {
 function drawText(o: UIText) {
     const ld = getOrCreateLayout(o);
 
-    let hOffset;
-    switch (ld.textVAlign) {
-        case 'top':    hOffset = 0; break;
-        case 'center': hOffset = (ld.h - ld.textMetrics!.actualBoundingBoxDescent) / 2 | 0; break;
-        case 'bottom': hOffset = (ld.h - ld.textMetrics!.actualBoundingBoxDescent) | 0; break;
-    }
-
     ctx.fillStyle = ld.color;
     ctx.font = ld.font;
-    ctx.fillText(o.text, ld.x, ld.y + hOffset);
+    ctx.fillText(o.text, ld.$x + ld.padding.left, ld.$y + ld.padding.top);
 
     drawBoundingBox(ld);
 }
 
-function drawButton(o: Button) {
+function drawImage(o: UIImage) {
+    const ld = getOrCreateLayout(o);
+    const atlas = loadedAtlases[o.src];
+
+    if (atlas) {
+        ctx.drawImage(atlas,
+            o.x ?? 0,
+            o.y ?? 0,
+            o.width ?? ld.imageDimensions!.width,
+            o.height ?? ld.imageDimensions!.height,
+            ld.$x + ld.padding.left,
+            ld.$y + ld.padding.top,
+            ld.$w - ld.padding.left - ld.padding.right,
+            ld.$h - ld.padding.top - ld.padding.bottom
+        );
+    }
+
+    drawBorder(ld);
+    drawBoundingBox(ld);
+}
+
+function drawButton(o: UIButton) {
     const ld = getOrCreateLayout(o);
 
     if (o.inner.kind === 'text') {
@@ -344,29 +386,29 @@ function drawButton(o: Button) {
         ctx.font = ld.font;
 
         const dims = ld.textMetrics!;
-        const ch = (ld.h - dims.actualBoundingBoxDescent) / 2 | 0;
+        const ch = (ld.$h - dims.actualBoundingBoxDescent) / 2 | 0;
 
         let wOffset;
-        switch (ld.textAlign) {
+        switch (ld.align) {
             case 'left': {
                 wOffset = 5;
                 break;
             }
             case 'right': {
-                wOffset = Math.max(ld.w - dims.width - 4 | 0, 5);
+                wOffset = Math.max(ld.$w - dims.width - 4 | 0, 5);
                 break;
             }
             case 'center': {
-                wOffset = (ld.w - dims.width) / 2 | 0;
+                wOffset = (ld.$w - dims.width) / 2 | 0;
                 break;
             }
         }
 
-        ctx.fillText(o.inner.text, ld.x + wOffset, ld.y + ch, ld.w - 9);
+        ctx.fillText(o.inner.text, ld.$x + wOffset, ld.$y + ch, ld.$w - 9);
 
 
         if (displayBoundingBoxes) {
-            drawBoundingBox({ x: ld.x + ld.w - dims.width - 4, y: ld.y, w: dims.width, h: dims.fontBoundingBoxDescent });
+            drawBoundingBox({ $x: ld.$x + ld.$w - dims.width - 4, $y: ld.$y, $w: dims.width, $h: dims.fontBoundingBoxDescent });
         }
     }
 
@@ -374,8 +416,33 @@ function drawButton(o: Button) {
         const atlas = loadedAtlases[o.inner.src];
 
         if (atlas) {
-            ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, ld.x, ld.y, ld.w, ld.h);
+            ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, ld.$x, ld.$y, ld.$w, ld.$h);
         }
+    }
+
+    drawBorder(ld);
+}
+
+function drawContainer(o: UIContainer) {
+    const ld = getOrCreateLayout(o);
+
+    // TODO: this must be `content{Width, Height}` not `$h / $w`
+    const clip = !!ld.scroll || ld.scrollHeight > ld.$h || ld.scrollWidth > ld.$w;
+    if (clip) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(ld.$x - 0.5, ld.$y - 0.5, ld.$w + 0.5, ld.$h + 0.5);
+        ctx.clip();
+    }
+
+    if (ld.backgroundColor) {
+        ctx.fillStyle = ld.backgroundColor;
+        ctx.fillRect(ld.$x, ld.$y, ld.$w, ld.$h);
+    }
+
+    drawUI(o.children);
+    if (clip) {
+        ctx.restore();
     }
 
     drawBorder(ld);
@@ -383,46 +450,13 @@ function drawButton(o: Button) {
 }
 
 function drawBorder(ld: LayoutData) {
-    const borderW = ld.borderW;
+    const borderWidth = ld.borderWidth;
+    const strokeStyle = ld.borderColor;
 
-    if (!borderW) {
-        return;
-    }
-
-    switch (typeof borderW) {
-        case 'number': {
-            ctx.strokeStyle = ld.borderColor;
-            ctx.lineWidth = borderW;
-
-            ctx.strokeRect(ld.x, ld.y, ld.w, ld.h);
-            return;
-        }
-
-        case 'string': {
-            let parsed = borderW.split(/\s+/g)
-                .map(Number);
-
-            const strokeStyle = ld.borderColor;
-
-            if (parsed.length !== 2 && parsed.length !== 4) {
-                console.warn(`Bad border style: ${borderW} ${JSON.stringify(parsed)}`);
-                return;
-            }
-
-            // top|bottom, left|right -> top,right,bottom,left
-            if (parsed.length === 2) {
-                parsed = [parsed[0]!, parsed[1]!, parsed[0]!, parsed[1]!];
-            }
-
-            drawLine(ld.x, ld.y, ld.w, 0, strokeStyle, parsed[0]!);
-            drawLine(ld.x + ld.w, ld.y, 0, ld.h, strokeStyle, parsed[1]!);
-            drawLine(ld.x, ld.y + ld.h, ld.w, 0, strokeStyle, parsed[2]!);
-            drawLine(ld.x, ld.y, 0, ld.h, strokeStyle, parsed[3]!);
-            return;
-        }
-
-        default: assertNever(borderW);
-    }
+    drawLine(ld.$x,         ld.$y,         ld.$w, 0,     strokeStyle, borderWidth.top);
+    drawLine(ld.$x + ld.$w, ld.$y,         0,     ld.$h, strokeStyle, borderWidth.right);
+    drawLine(ld.$x,         ld.$y + ld.$h, ld.$w, 0,     strokeStyle, borderWidth.bottom);
+    drawLine(ld.$x,         ld.$y,         0,     ld.$h, strokeStyle, borderWidth.left);
 }
 
 function drawLine(x: number, y: number, w: number, h: number, strokeStyle: string, lineWidth: number) {
@@ -438,36 +472,11 @@ function drawLine(x: number, y: number, w: number, h: number, strokeStyle: strin
     ctx.stroke();
 }
 
-function drawAutoContainer(o: AutoContainer) {
-    const ld = getOrCreateLayout(o);
-
-    const clip = !!ld.scroll || ld.scrollHeight > ld.h || ld.scrollWidth > ld.w;
-    if (clip) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(ld.x - 0.5, ld.y - 0.5, ld.w + 0.5, ld.h + 0.5);
-        ctx.clip();
-    }
-
-    if (ld.backgroundColor) {
-        ctx.fillStyle = ld.backgroundColor;
-        ctx.fillRect(ld.x, ld.y, ld.w, ld.h);
-    }
-
-    drawUI(o.children);
-    if (clip) {
-        ctx.restore();
-    }
-
-    drawBorder(ld);
-    drawBoundingBox(ld);
-}
-
-function drawBoundingBox({x, y, w, h}: { x: number, y: number, w: number, h: number }) {
+function drawBoundingBox({$x, $y, $w, $h}: { $x: number, $y: number, $w: number, $h: number }) {
     if (displayBoundingBoxes) {
         ctx.strokeStyle = 'red';
         ctx.lineWidth = 1;
-        ctx.strokeRect(x, y, w, h);
+        ctx.strokeRect($x, $y, $w, $h);
     }
 }
 
@@ -478,7 +487,7 @@ function getOrCreateLayout(o: UI): LayoutData {
         idMap.set(o, id);
     }
 
-    const existing = layoutDataCache[id];
+    const existing = layoutCache.get(id);
     if (existing && existing.style === o.style) {
         return existing.layout;
     }
@@ -488,33 +497,44 @@ function getOrCreateLayout(o: UI): LayoutData {
         : o.style;
 
     const ld = createLayoutData(style);
-    layoutDataCache[id] = { style: o.style, layout: ld };
+    layoutCache.set(id, { style: o.style, layout: ld });
 
     return ld;
 }
 
+const zeroTRBL: TRBL = {
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+};
+
 function createLayoutData(style: UIStyle | undefined): LayoutData {
-    const res: LayoutPrivate & LayoutData = {
-        $x: undefined,
-        $y: undefined,
-        $w: undefined,
-        $h: undefined,
+    const res: LayoutData & {
+        $$x: number | undefined,
+        $$y: number | undefined,
+
+        $borderWidth: { key: string | number, value: TRBL },
+        $margin: { key: string | number, value: TRBL },
+        $padding: { key: string | number, value: TRBL },
+        $gap: { key: string | number, value: { row: number, column: number } }
+    } = {
+        $$x: undefined,
+        $$y: undefined,
 
         style,
 
-        get x() { return this.$x ?? style?.x ?? defaultStyle.x; },
-        set x(val: number) { this.$x = val; },
+        get $x() { return this.$$x ?? style?.left ?? defaultStyle.left; },
+        set $x(val: number) { this.$$x = val; },
 
-        get y() { return this.$y ?? style?.y ?? defaultStyle.y; },
-        set y(val: number) { this.$y = val; },
+        get $y() { return this.$$y ?? style?.top ?? defaultStyle.top; },
+        set $y(val: number) { this.$$y = val; },
 
-        get w() { return this.$w ?? style?.w ?? defaultStyle.w; },
-        set w(val: number) { this.$w = val; },
-
-        get h() { return this.$h ?? style?.h ?? defaultStyle.h; },
-        set h(val: number) { this.$h = val; },
+        $w: 0,
+        $h: 0,
 
         textMetrics: undefined,
+        imageDimensions: undefined,
 
         scroll: style?.scroll,
         scrollX: 0,
@@ -527,39 +547,115 @@ function createLayoutData(style: UIStyle | undefined): LayoutData {
         get maxHeight()       { return style?.maxHeight       || defaultStyle.maxHeight;       },
         get color()           { return style?.color           || defaultStyle.color;           },
         get font()            { return style?.font            || defaultStyle.font;            },
-        get textAlign()       { return style?.textAlign       || defaultStyle.textAlign;       },
-        get textVAlign()      { return style?.textVAlign      || defaultStyle.textVAlign;      },
-        get borderW()         { return style?.borderW         || defaultStyle.borderW;         },
+        get align()           { return style?.align           || defaultStyle.align;           },
+        get verticalAlign()   { return style?.verticalAlign   || defaultStyle.verticalAlign;   },
         get borderColor()     { return style?.borderColor     || defaultStyle.borderColor;     },
         get backgroundColor() { return style?.backgroundColor || defaultStyle.backgroundColor; },
         get display()         { return style?.display         || defaultStyle.display          },
-        get gap()             { return style?.gap             || defaultStyle.gap;             },
+
+        get layoutMode()      { return style?.layoutMode      || defaultStyle.layoutMode       },
+
+        $borderWidth: { key: 0, value: zeroTRBL },
+        get borderWidth() {
+            return cacheTRBL('borderWidth', this.$borderWidth, style?.borderWidth || defaultStyle.borderWidth);
+        },
+
+        $margin: { key: 0, value: zeroTRBL },
+        get margin() {
+            return cacheTRBL('margin', this.$margin, style?.margin ?? defaultStyle.margin);
+        },
+
+        $padding: { key: 0, value: zeroTRBL },
+        get padding() {
+            return cacheTRBL('padding', this.$padding, style?.padding ?? defaultStyle.padding);
+        },
+
+        $gap: { key: 0, value: { row: 0, column: 0 } },
+        get gap() {
+            return cacheGap('gap', this.$gap, style?.gap ?? defaultStyle.gap);
+        },
     };
 
     return res;
+}
+
+function cacheTRBL(property: string, cache: { key: string | number, value: TRBL }, key: string|number): TRBL {
+    if (cache.key === key) {
+        return cache.value;
+    }
+
+    if (typeof key === 'number') {
+        cache.key = key;
+        cache.value = { top: key, right: key, bottom: key, left: key };
+
+        return cache.value;
+    }
+
+    let parsed = key.split(/\s+/g)
+        .map(Number);
+
+    if (parsed.length !== 2 && parsed.length !== 4) {
+        console.warn(`Bad ${property} style: ${key}`);
+        parsed = [0, 0, 0, 0];
+    } else if (parsed.length === 2) {
+        // top|bottom, left|right -> top,right,bottom,left
+        parsed = [parsed[0]!, parsed[1]!, parsed[0]!, parsed[1]!];
+    }
+
+    cache.key = key;
+    cache.value = { top: parsed[0]!, right: parsed[1]!, bottom: parsed[2]!, left: parsed[3]! };
+
+    return cache.value;
+}
+
+function cacheGap(property: string, cache: { key: string | number, value: { row: number, column: number } }, key: string|number): { row: number, column: number } {
+    if (cache.key === key) {
+        return cache.value;
+    }
+
+    if (typeof key === 'number') {
+        cache.key = key;
+        cache.value = { row: key, column: key };
+
+        return cache.value;
+    }
+
+    let parsed = key.split(/\s+/g)
+        .map(Number);
+
+    if (parsed.length !== 2) {
+        console.warn(`Bad ${property} style: ${key}`);
+        parsed = [0, 0];
+    }
+
+    cache.key = key;
+    cache.value = { row: parsed[0]!, column: parsed[1]! };
+
+    return cache.value;
 }
 
 export function handleClickUI(ui: UI[]): boolean {
     for (const o of ui) {
         switch (o.kind) {
             case 'text':
+            case 'image':
                 break;
 
-            case 'auto-container': {
-                if (!isClickInside(o)) {
-                    break;
-                }
-
-                if (handleClickUI(o.children)) {
+            case 'button': {
+                if (isClickInside(o)) {
+                    o.onClick(o);
                     return true;
                 }
 
                 break;
             }
 
-            case 'button': {
-                if (isClickInside(o)) {
-                    o.onClick(o);
+            case 'container': {
+                if (!isClickInside(o)) {
+                    break;
+                }
+
+                if (handleClickUI(o.children)) {
                     return true;
                 }
 
@@ -579,18 +675,18 @@ export function isClickInside(o: UI) {
     // for a click to be valid, both the initial touch down and the current position need
     // to be inside the element
     return ld.display !== 'none'
-        && clickX! >= ld.x && clickX! <= ld.x + ld.w
-        && clickY! >= ld.y && clickY! <= ld.y + ld.h
-        && mouseX >= ld.x && mouseX <= ld.x + ld.w
-        && mouseY >= ld.y && mouseY <= ld.y + ld.h;
+        && clickX! >= ld.$x && clickX! <= ld.$x + ld.$w
+        && clickY! >= ld.$y && clickY! <= ld.$y + ld.$h
+        && mouseX >= ld.$x && mouseX <= ld.$x + ld.$w
+        && mouseY >= ld.$y && mouseY <= ld.$y + ld.$h;
 }
 
 export function isMouseInside(o: UI) {
     const ld = getOrCreateLayout(o);
 
     return ld.display !== 'none'
-        && mouseX >= ld.x && mouseX <= ld.x + ld.w
-        && mouseY >= ld.y && mouseY <= ld.y + ld.h;
+        && mouseX >= ld.$x && mouseX <= ld.$x + ld.$w
+        && mouseY >= ld.$y && mouseY <= ld.$y + ld.$h;
 }
 
 function isScrollInside(o: UI, isWheel: boolean) {
@@ -598,25 +694,26 @@ function isScrollInside(o: UI, isWheel: boolean) {
 
     if (isWheel) {
         return ld.display !== 'none'
-            && mouseX >= ld.x && mouseX <= ld.x + ld.w
-            && mouseY >= ld.y && mouseY <= ld.y + ld.h;
+            && mouseX >= ld.$x && mouseX <= ld.$x + ld.$w
+            && mouseY >= ld.$y && mouseY <= ld.$y + ld.$h;
     }
 
     // touch devices: scroll should work for the element where the tap was initiated
     // even if the current position of the pointer is outside the scrolled element
     return ld.display !== 'none'
-        && clickX! >= ld.x && clickX! <= ld.x + ld.w
-        && clickY! >= ld.y && clickY! <= ld.y + ld.h;
+        && clickX! >= ld.$x && clickX! <= ld.$x + ld.$w
+        && clickY! >= ld.$y && clickY! <= ld.$y + ld.$h;
 }
 
 export function handleScrollUI(ui: UI[], deltaX: number, deltaY: number, isWheel: boolean): boolean {
     for (const o of ui) {
         switch (o.kind) {
             case 'text':
+            case 'image':
             case 'button':
                 break;
 
-            case 'auto-container': {
+            case 'container': {
                 if (!isScrollInside(o, isWheel)) {
                     break;
                 }
