@@ -85,6 +85,9 @@ export function setup() {
         const handler = KbShortcuts.get(sigil);
         if (handler && (!e.repeat || handler.repeat)) {
             handler.fn();
+
+            // TODO: this should be configurable
+            e.preventDefault();
         }
     });
 
