@@ -207,13 +207,15 @@ function resize() {
     width = canvas.clientWidth;
     height = canvas.clientHeight;
 
-    // fix for high-dpi displays
-    if (window.devicePixelRatio !== 1) {
-        canvas.width = width * window.devicePixelRatio;
-        canvas.height = height * window.devicePixelRatio;
+    // we need to set proper width / height of the canvas, as it's 300x150 by default
+    // also, make sure that it takes into account high dpi displays
+    const devicePixelRatio = window.devicePixelRatio ?? 1;
+    canvas.width = width * devicePixelRatio;
+    canvas.height = height * devicePixelRatio;
 
-        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-    }
+    // calling resize (by extension `scale`) multiple times is fine and does not add up,
+    // as setting width/height of the canvas resets the context & its matrix
+    ctx.scale(devicePixelRatio, devicePixelRatio);
 
     raise({ kind: 'resize' });
 }
