@@ -193,6 +193,8 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
             const handler = KbShortcuts.get(sigil);
             if (handler && (!e.repeat || handler.repeat)) {
                 handler.fn();
+                // TODO: this should be configurable
+                e.preventDefault();
             }
         });
         window.addEventListener('mousemove', e => {
@@ -300,12 +302,14 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
         }
         exports.width = exports.canvas.clientWidth;
         exports.height = exports.canvas.clientHeight;
-        // fix for high-dpi displays
-        if (window.devicePixelRatio !== 1) {
-            exports.canvas.width = exports.width * window.devicePixelRatio;
-            exports.canvas.height = exports.height * window.devicePixelRatio;
-            exports.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-        }
+        // we need to set proper width / height of the canvas, as it's 300x150 by default
+        // also, make sure that it takes into account high dpi displays
+        const devicePixelRatio = window.devicePixelRatio ?? 1;
+        exports.canvas.width = exports.width * devicePixelRatio;
+        exports.canvas.height = exports.height * devicePixelRatio;
+        // calling resize (by extension `scale`) multiple times is fine and does not add up,
+        // as setting width/height of the canvas resets the context & its matrix
+        exports.ctx.scale(devicePixelRatio, devicePixelRatio);
         raise({ kind: 'resize' });
     }
     function keydownListener(e) {
@@ -511,27 +515,30 @@ define("mini-css", ["require", "exports"], function (require, exports) {
 define("ui", ["require", "exports", "engine", "mini-css", "util"], function (require, exports, engine_1, mini_css_1, util_2) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.handleScrollUI = exports.handleClickUI = exports.drawUI = exports.addAtlasesUI = exports.addStylesUI = exports.displayBoundingBoxes = void 0;
+    exports.debugBoundingBox = exports.handleScrollUI = exports.isMouseInside = exports.isClickInside = exports.handleClickUI = exports.drawUI = exports.addAtlasesUI = exports.addStylesUI = exports.displayBoundingBoxes = exports.styles = void 0;
     const defaultStyle = {
-        x: 0,
-        y: 0,
-        w: 0,
-        h: 0,
+        top: 0,
+        left: 0,
         maxWidth: undefined,
         maxHeight: undefined,
         color: 'aqua',
         font: '12px monospace',
-        textAlign: 'left',
-        textVAlign: 'center',
-        borderW: 0,
+        align: 'left',
+        verticalAlign: 'top',
+        borderWidth: 0,
         borderColor: 'aqua',
+        backgroundColor: undefined,
+        display: 'visible',
+        margin: 0,
+        padding: 0,
+        layoutMode: 'column',
         gap: 0,
         scroll: undefined,
     };
-    const styles = {};
-    const layoutDataCache = {};
+    exports.styles = {};
     const loadedAtlases = {};
     const idMap = new WeakMap();
+    const layoutCache = new Map();
     let displayBoundingBoxes = false;
     function accessDisplayBoundingBoxes(val) {
         if (typeof val === 'boolean') {
@@ -542,7 +549,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
     exports.displayBoundingBoxes = accessDisplayBoundingBoxes;
     function addStylesUI(styleContext, stylesToAdd) {
         const compiled = (0, mini_css_1.compileStyle)(styleContext, stylesToAdd);
-        Object.defineProperties(styles, Object.getOwnPropertyDescriptors(compiled));
+        Object.defineProperties(exports.styles, Object.getOwnPropertyDescriptors(compiled));
     }
     exports.addStylesUI = addStylesUI;
     function addAtlasesUI(atlases) {
@@ -560,39 +567,24 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
     exports.drawUI = layoutDraw;
     function calcBoxes(ui) {
         for (const o of ui) {
+            const ld = getOrCreateLayout(o);
+            if (ld.display === 'none') {
+                continue;
+            }
             switch (o.kind) {
-                case 'button':
-                    calcButtonBox(o);
-                    break;
                 case 'text':
                     calcTextBox(o);
                     break;
-                case 'auto-container':
-                    calcAutoContainerBox(o);
+                case 'image':
+                    calcImageBox(o);
+                    break;
+                case 'button':
+                    calcButtonBox(o);
+                    break;
+                case 'container':
+                    calcContainerBox(o);
                     break;
                 default: (0, util_2.assertNever)(o);
-            }
-        }
-    }
-    function calcButtonBox(o) {
-        const ld = getOrCreateLayout(o);
-        if (o.inner.kind === 'text') {
-            engine_1.ctx.font = ld.font;
-            const dims = engine_1.ctx.measureText(o.inner.text);
-            ld.textMetrics = dims;
-            if (ld.style?.w === undefined) {
-                ld.w = dims.width + 10;
-            }
-            if (ld.style?.h === undefined) {
-                ld.h = dims.actualBoundingBoxDescent + 10;
-            }
-        }
-        if (o.inner.kind === 'image') {
-            if (ld.style?.w === undefined) {
-                ld.w = o.inner.w;
-            }
-            if (ld.style?.h === undefined) {
-                ld.h = o.inner.h;
             }
         }
     }
@@ -601,80 +593,117 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         engine_1.ctx.font = ld.font;
         const dims = engine_1.ctx.measureText(o.text);
         ld.textMetrics = dims;
-        if (ld.style?.w === undefined) {
-            ld.w = dims.width;
+        ld.$w = ld.style?.width ?? (dims.width + ld.padding.left + ld.padding.right);
+        ld.$h = ld.style?.height ?? (dims.fontBoundingBoxDescent + ld.padding.top + ld.padding.bottom);
+    }
+    function calcImageBox(o) {
+        const ld = getOrCreateLayout(o);
+        const img = loadedAtlases[o.src];
+        ld.imageDimensions = img
+            ? { width: img.naturalWidth, height: img.naturalHeight }
+            : { width: 0, height: 0 };
+        ld.$w = ld.style?.width ?? ((o.width ?? ld.imageDimensions.width) + ld.padding.left + ld.padding.right);
+        ld.$h = ld.style?.height ?? ((o.height ?? ld.imageDimensions.height) + ld.padding.top + ld.padding.bottom);
+    }
+    function calcButtonBox(o) {
+        const ld = getOrCreateLayout(o);
+        if (o.inner.kind === 'text') {
+            engine_1.ctx.font = ld.font;
+            const dims = engine_1.ctx.measureText(o.inner.text);
+            ld.textMetrics = dims;
+            ld.$w = ld.style?.width ?? (dims.width + ld.padding.left + ld.padding.right + 10);
+            ld.$h = ld.style?.height ?? (dims.actualBoundingBoxDescent + ld.padding.top + ld.padding.bottom + 10);
         }
-        if (ld.style?.h === undefined) {
-            ld.h = dims.actualBoundingBoxDescent;
+        if (o.inner.kind === 'image') {
+            ld.$w = ld.style?.width ?? (o.inner.w + ld.padding.left + ld.padding.right);
+            ld.$h = ld.style?.width ?? (o.inner.h + ld.padding.top + ld.padding.bottom);
         }
     }
-    function calcAutoContainerBox(o) {
+    function calcContainerBox(o) {
         const ld = getOrCreateLayout(o);
-        // first, layout its children to obtain accurate (w,h)
+        // first, layout its children to obtain accurate ($w,$h)
         calcBoxes(o.children);
-        ld.scrollHeight = o.mode === 'row'
-            ? o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).h), 0)
-            : o.children.reduce((acc, x) => acc + getOrCreateLayout(x).h + ld.gap, 0) + (o.children.length > 0 ? -ld.gap : 0);
-        ld.scrollWidth = o.mode === 'row'
-            ? o.children.reduce((acc, x) => acc + getOrCreateLayout(x).w + ld.gap, 0) + (o.children.length > 0 ? -ld.gap : 0)
-            : o.children.reduce((acc, x) => Math.max(acc, getOrCreateLayout(x).w), 0);
-        ld.scrollX = (0, util_2.clamp)(ld.scrollX, Math.min(ld.w, ld.scrollWidth) - ld.scrollWidth, 0);
-        ld.scrollY = (0, util_2.clamp)(ld.scrollY, Math.min(ld.h, ld.scrollHeight) - ld.scrollHeight, 0);
-        if (ld.style?.h === undefined) {
-            ld.h = ld.scrollHeight;
-        }
-        if (ld.style?.w === undefined) {
-            ld.w = ld.scrollWidth;
-        }
-        const maxHeight = ld.style?.maxHeight;
-        if (maxHeight) {
-            ld.h = Math.min(maxHeight, ld.scrollHeight);
-        }
-        const maxWidth = ld.style?.maxWidth;
-        if (maxWidth) {
-            ld.w = Math.min(maxWidth, ld.scrollWidth);
-        }
+        ld.scrollHeight = ld.layoutMode === 'row'
+            ? o.children.reduce((acc, x) => {
+                const cl = getOrCreateLayout(x);
+                const h = cl.$h + cl.margin.top + cl.margin.bottom;
+                return cl.display === 'none' ? acc : Math.max(acc, h);
+            }, 0)
+            : o.children.reduce((acc, x) => {
+                const cl = getOrCreateLayout(x);
+                const h = cl.$h + cl.margin.top + cl.margin.bottom;
+                return cl.display === 'none' ? acc : acc + h + (acc ? ld.gap.row : 0);
+            }, 0);
+        ld.scrollWidth = ld.layoutMode === 'row'
+            ? o.children.reduce((acc, x) => {
+                const cl = getOrCreateLayout(x);
+                const w = cl.$w + cl.margin.left + cl.margin.right;
+                return cl.display === 'none' ? acc : acc + w + (acc ? ld.gap.column : 0);
+            }, 0)
+            : o.children.reduce((acc, x) => {
+                const cl = getOrCreateLayout(x);
+                const w = cl.$w + cl.margin.left + cl.margin.right;
+                return cl.display === 'none' ? acc : Math.max(acc, w);
+            }, 0);
+        ld.$w = Math.min(ld.style?.width ?? (ld.scrollWidth + ld.padding.left + ld.padding.right), ld.style?.maxWidth ?? Infinity);
+        ld.$h = Math.min(ld.style?.height ?? (ld.scrollHeight + ld.padding.top + ld.padding.bottom), ld.style?.maxHeight ?? Infinity);
+        ld.scrollX = (0, util_2.clamp)(ld.scrollX, Math.min(ld.$w, ld.scrollWidth) - ld.scrollWidth, 0);
+        ld.scrollY = (0, util_2.clamp)(ld.scrollY, Math.min(ld.$h, ld.scrollHeight) - ld.scrollHeight, 0);
     }
     function layout(ui) {
         for (const o of ui) {
+            const ld = getOrCreateLayout(o);
+            if (ld.display === 'none') {
+                continue;
+            }
             switch (o.kind) {
-                case 'button':
                 case 'text': break;
-                case 'auto-container':
-                    layoutAutoContainer(o);
+                case 'image': break;
+                case 'button': break;
+                case 'container':
+                    layoutContainer(o);
                     break;
                 default: (0, util_2.assertNever)(o);
             }
         }
     }
-    function layoutAutoContainer(o) {
+    function layoutContainer(o) {
         const ld = getOrCreateLayout(o);
-        let dy = 0;
-        let dx = 0;
+        // TODO: fix `ld.$x` and `ld.$y` for parent;
+        // currently handled by `LayoutData` haxy
+        let dx = ld.$x + ld.padding.left + ld.scrollX;
+        let dy = ld.$y + ld.padding.top + ld.scrollY;
         for (const c of o.children) {
             const childLd = getOrCreateLayout(c);
-            childLd.x = ld.x + dx + ld.scrollX;
-            childLd.y = ld.y + dy + ld.scrollY;
-            if (o.mode === 'column') {
-                dy += childLd.h + ld.gap;
+            childLd.$x = dx + childLd.margin.left;
+            childLd.$y = dy + childLd.margin.top;
+            if (ld.layoutMode === 'row') {
+                dx += childLd.$w + childLd.margin.left + childLd.margin.right + ld.gap.column;
             }
             else {
-                dx += childLd.w + ld.gap;
+                dy += childLd.$h + childLd.margin.top + childLd.margin.bottom + ld.gap.row;
             }
         }
         layout(o.children);
     }
     function drawUI(ui) {
         for (const o of ui) {
+            const ld = getOrCreateLayout(o);
+            if (ld.display !== 'visible') {
+                continue;
+            }
             switch (o.kind) {
                 case 'text':
                     drawText(o);
                     break;
+                case 'image':
+                    drawImage(o);
+                    break;
                 case 'button':
                     drawButton(o);
                     break;
-                case 'auto-container':
-                    drawAutoContainer(o);
+                case 'container':
+                    drawContainer(o);
                     break;
                 default: (0, util_2.assertNever)(o);
             }
@@ -682,21 +711,22 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
     }
     function drawText(o) {
         const ld = getOrCreateLayout(o);
-        let hOffset;
-        switch (ld.textVAlign) {
-            case 'top':
-                hOffset = 0;
-                break;
-            case 'center':
-                hOffset = (ld.h - ld.textMetrics.actualBoundingBoxDescent) / 2 | 0;
-                break;
-            case 'bottom':
-                hOffset = (ld.h - ld.textMetrics.actualBoundingBoxDescent) | 0;
-                break;
+        if (ld.backgroundColor) {
+            engine_1.ctx.fillStyle = ld.backgroundColor;
+            engine_1.ctx.fillRect(ld.$x, ld.$y, ld.$w, ld.$h);
         }
         engine_1.ctx.fillStyle = ld.color;
         engine_1.ctx.font = ld.font;
-        engine_1.ctx.fillText(o.text, ld.x, ld.y + hOffset);
+        engine_1.ctx.fillText(o.text, ld.$x + ld.padding.left, ld.$y + ld.padding.top);
+        drawBoundingBox(ld);
+    }
+    function drawImage(o) {
+        const ld = getOrCreateLayout(o);
+        const atlas = loadedAtlases[o.src];
+        if (atlas) {
+            engine_1.ctx.drawImage(atlas, o.x ?? 0, o.y ?? 0, o.width ?? ld.imageDimensions.width, o.height ?? ld.imageDimensions.height, ld.$x + ld.padding.left, ld.$y + ld.padding.top, ld.$w - ld.padding.left - ld.padding.right, ld.$h - ld.padding.top - ld.padding.bottom);
+        }
+        drawBorder(ld);
         drawBoundingBox(ld);
     }
     function drawButton(o) {
@@ -705,68 +735,63 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             engine_1.ctx.fillStyle = ld.color;
             engine_1.ctx.font = ld.font;
             const dims = ld.textMetrics;
-            const ch = (ld.h - dims.actualBoundingBoxDescent) / 2 | 0;
+            const ch = (ld.$h - dims.actualBoundingBoxDescent) / 2 | 0;
             let wOffset;
-            switch (ld.textAlign) {
+            switch (ld.align) {
                 case 'left': {
                     wOffset = 5;
                     break;
                 }
                 case 'right': {
-                    wOffset = Math.max(ld.w - dims.width - 4 | 0, 5);
+                    wOffset = Math.max(ld.$w - dims.width - 4 | 0, 5);
                     break;
                 }
                 case 'center': {
-                    wOffset = (ld.w - dims.width) / 2 | 0;
+                    wOffset = (ld.$w - dims.width) / 2 | 0;
                     break;
                 }
             }
-            engine_1.ctx.fillText(o.inner.text, ld.x + wOffset, ld.y + ch, ld.w - 9);
+            engine_1.ctx.fillText(o.inner.text, ld.$x + wOffset, ld.$y + ch, ld.$w - 9);
             if (displayBoundingBoxes) {
-                drawBoundingBox({ x: ld.x + ld.w - dims.width - 4, y: ld.y, w: dims.width, h: dims.fontBoundingBoxDescent });
+                drawBoundingBox({ $x: ld.$x + ld.$w - dims.width - 4, $y: ld.$y, $w: dims.width, $h: dims.fontBoundingBoxDescent });
             }
         }
         if (o.inner.kind === 'image') {
             const atlas = loadedAtlases[o.inner.src];
             if (atlas) {
-                engine_1.ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, ld.x, ld.y, ld.w, ld.h);
+                engine_1.ctx.drawImage(atlas, o.inner.dx, o.inner.dy, o.inner.w, o.inner.h, ld.$x, ld.$y, ld.$w, ld.$h);
             }
+        }
+        drawBorder(ld);
+    }
+    function drawContainer(o) {
+        const ld = getOrCreateLayout(o);
+        // TODO: this must be `content{Width, Height}` not `$h / $w`
+        const clip = !!ld.scroll || ld.scrollHeight > ld.$h || ld.scrollWidth > ld.$w;
+        if (clip) {
+            engine_1.ctx.save();
+            engine_1.ctx.beginPath();
+            engine_1.ctx.rect(ld.$x - 0.5, ld.$y - 0.5, ld.$w + 0.5, ld.$h + 0.5);
+            engine_1.ctx.clip();
+        }
+        if (ld.backgroundColor) {
+            engine_1.ctx.fillStyle = ld.backgroundColor;
+            engine_1.ctx.fillRect(ld.$x, ld.$y, ld.$w, ld.$h);
+        }
+        drawUI(o.children);
+        if (clip) {
+            engine_1.ctx.restore();
         }
         drawBorder(ld);
         drawBoundingBox(ld);
     }
     function drawBorder(ld) {
-        const borderW = ld.borderW;
-        if (!borderW) {
-            return;
-        }
-        switch (typeof borderW) {
-            case 'number': {
-                engine_1.ctx.strokeStyle = ld.borderColor;
-                engine_1.ctx.lineWidth = borderW;
-                engine_1.ctx.strokeRect(ld.x, ld.y, ld.w, ld.h);
-                return;
-            }
-            case 'string': {
-                let parsed = borderW.split(/\s+/g)
-                    .map(Number);
-                const strokeStyle = ld.borderColor;
-                if (parsed.length !== 2 && parsed.length !== 4) {
-                    console.warn(`Bad border style: ${borderW} ${JSON.stringify(parsed)}`);
-                    return;
-                }
-                // top|bottom, left|right -> top,right,bottom,left
-                if (parsed.length === 2) {
-                    parsed = [parsed[0], parsed[1], parsed[0], parsed[1]];
-                }
-                drawLine(ld.x, ld.y, ld.w, 0, strokeStyle, parsed[0]);
-                drawLine(ld.x + ld.w, ld.y, 0, ld.h, strokeStyle, parsed[1]);
-                drawLine(ld.x, ld.y + ld.h, ld.w, 0, strokeStyle, parsed[2]);
-                drawLine(ld.x, ld.y, 0, ld.h, strokeStyle, parsed[3]);
-                return;
-            }
-            default: (0, util_2.assertNever)(borderW);
-        }
+        const borderWidth = ld.borderWidth;
+        const strokeStyle = ld.borderColor;
+        drawLine(ld.$x, ld.$y, ld.$w, 0, strokeStyle, borderWidth.top);
+        drawLine(ld.$x + ld.$w, ld.$y, 0, ld.$h, strokeStyle, borderWidth.right);
+        drawLine(ld.$x, ld.$y + ld.$h, ld.$w, 0, strokeStyle, borderWidth.bottom);
+        drawLine(ld.$x, ld.$y, 0, ld.$h, strokeStyle, borderWidth.left);
     }
     function drawLine(x, y, w, h, strokeStyle, lineWidth) {
         if (!lineWidth) {
@@ -779,27 +804,11 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         engine_1.ctx.lineTo(x + w, y + h);
         engine_1.ctx.stroke();
     }
-    function drawAutoContainer(o) {
-        const ld = getOrCreateLayout(o);
-        const clip = !!ld.scroll || ld.scrollHeight > ld.h || ld.scrollWidth > ld.w;
-        if (clip) {
-            engine_1.ctx.save();
-            engine_1.ctx.beginPath();
-            engine_1.ctx.rect(ld.x - 0.5, ld.y - 0.5, ld.w + 0.5, ld.h + 0.5);
-            engine_1.ctx.clip();
-        }
-        drawUI(o.children);
-        if (clip) {
-            engine_1.ctx.restore();
-        }
-        drawBorder(ld);
-        drawBoundingBox(ld);
-    }
-    function drawBoundingBox({ x, y, w, h }) {
+    function drawBoundingBox({ $x, $y, $w, $h }) {
         if (displayBoundingBoxes) {
             engine_1.ctx.strokeStyle = 'red';
             engine_1.ctx.lineWidth = 1;
-            engine_1.ctx.strokeRect(x, y, w, h);
+            engine_1.ctx.strokeRect($x, $y, $w, $h);
         }
     }
     function getOrCreateLayout(o) {
@@ -808,33 +817,36 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             id = (0, util_2.uuid)();
             idMap.set(o, id);
         }
-        const existing = layoutDataCache[id];
+        const existing = layoutCache.get(id);
         if (existing && existing.style === o.style) {
             return existing.layout;
         }
         const style = typeof o.style === 'string'
-            ? styles[o.style]
+            ? exports.styles[o.style]
             : o.style;
         const ld = createLayoutData(style);
-        layoutDataCache[id] = { style: o.style, layout: ld };
+        layoutCache.set(id, { style: o.style, layout: ld });
         return ld;
     }
+    const zeroTRBL = {
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+    };
     function createLayoutData(style) {
         const res = {
-            $x: undefined,
-            $y: undefined,
-            $w: undefined,
-            $h: undefined,
+            $$x: undefined,
+            $$y: undefined,
             style,
-            get x() { return this.$x ?? style?.x ?? defaultStyle.x; },
-            set x(val) { this.$x = val; },
-            get y() { return this.$y ?? style?.y ?? defaultStyle.y; },
-            set y(val) { this.$y = val; },
-            get w() { return this.$w ?? style?.w ?? defaultStyle.w; },
-            set w(val) { this.$w = val; },
-            get h() { return this.$h ?? style?.h ?? defaultStyle.h; },
-            set h(val) { this.$h = val; },
+            get $x() { return this.$$x ?? style?.left ?? defaultStyle.left; },
+            set $x(val) { this.$$x = val; },
+            get $y() { return this.$$y ?? style?.top ?? defaultStyle.top; },
+            set $y(val) { this.$$y = val; },
+            $w: 0,
+            $h: 0,
             textMetrics: undefined,
+            imageDimensions: undefined,
             scroll: style?.scroll,
             scrollX: 0,
             scrollY: 0,
@@ -845,31 +857,101 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             get maxHeight() { return style?.maxHeight || defaultStyle.maxHeight; },
             get color() { return style?.color || defaultStyle.color; },
             get font() { return style?.font || defaultStyle.font; },
-            get textAlign() { return style?.textAlign || defaultStyle.textAlign; },
-            get textVAlign() { return style?.textVAlign || defaultStyle.textVAlign; },
-            get borderW() { return style?.borderW || defaultStyle.borderW; },
+            get align() { return style?.align || defaultStyle.align; },
+            get verticalAlign() { return style?.verticalAlign || defaultStyle.verticalAlign; },
             get borderColor() { return style?.borderColor || defaultStyle.borderColor; },
-            get gap() { return style?.gap || defaultStyle.gap; },
+            get backgroundColor() { return style?.backgroundColor || defaultStyle.backgroundColor; },
+            get display() { return style?.display || defaultStyle.display; },
+            get layoutMode() { return style?.layoutMode || defaultStyle.layoutMode; },
+            $borderWidth: { key: 0, value: zeroTRBL },
+            get borderWidth() {
+                return cacheTRBL('borderWidth', this.$borderWidth, style?.borderWidth || defaultStyle.borderWidth);
+            },
+            $margin: { key: 0, value: zeroTRBL },
+            get margin() {
+                return cacheTRBL('margin', this.$margin, style?.margin ?? defaultStyle.margin);
+            },
+            $padding: { key: 0, value: zeroTRBL },
+            get padding() {
+                return cacheTRBL('padding', this.$padding, style?.padding ?? defaultStyle.padding);
+            },
+            $gap: { key: 0, value: { row: 0, column: 0 } },
+            get gap() {
+                return cacheGap('gap', this.$gap, style?.gap ?? defaultStyle.gap);
+            },
         };
         return res;
+    }
+    function cacheTRBL(property, cache, key) {
+        if (cache.key === key) {
+            return cache.value;
+        }
+        if (typeof key === 'number') {
+            cache.key = key;
+            cache.value = { top: key, right: key, bottom: key, left: key };
+            return cache.value;
+        }
+        if (typeof key === 'object') {
+            cache.key = key;
+            cache.value = {
+                get top() { return key.top ?? 0; },
+                get right() { return key.right ?? 0; },
+                get bottom() { return key.bottom ?? 0; },
+                get left() { return key.left ?? 0; },
+            };
+            return cache.value;
+        }
+        let parsed = key.split(/\s+/g)
+            .map(Number);
+        if (parsed.length !== 2 && parsed.length !== 4) {
+            console.warn(`Bad ${property} style: ${key}`);
+            parsed = [0, 0, 0, 0];
+        }
+        else if (parsed.length === 2) {
+            // top|bottom, left|right -> top,right,bottom,left
+            parsed = [parsed[0], parsed[1], parsed[0], parsed[1]];
+        }
+        cache.key = key;
+        cache.value = { top: parsed[0], right: parsed[1], bottom: parsed[2], left: parsed[3] };
+        return cache.value;
+    }
+    function cacheGap(property, cache, key) {
+        if (cache.key === key) {
+            return cache.value;
+        }
+        if (typeof key === 'number') {
+            cache.key = key;
+            cache.value = { row: key, column: key };
+            return cache.value;
+        }
+        let parsed = key.split(/\s+/g)
+            .map(Number);
+        if (parsed.length !== 2) {
+            console.warn(`Bad ${property} style: ${key}`);
+            parsed = [0, 0];
+        }
+        cache.key = key;
+        cache.value = { row: parsed[0], column: parsed[1] };
+        return cache.value;
     }
     function handleClickUI(ui) {
         for (const o of ui) {
             switch (o.kind) {
                 case 'text':
+                case 'image':
                     break;
-                case 'auto-container': {
-                    if (!isClickInside(o)) {
-                        break;
-                    }
-                    if (handleClickUI(o.children)) {
+                case 'button': {
+                    if (isClickInside(o)) {
+                        o.onClick(o);
                         return true;
                     }
                     break;
                 }
-                case 'button': {
-                    if (isClickInside(o)) {
-                        o.onClick(o);
+                case 'container': {
+                    if (!isClickInside(o)) {
+                        break;
+                    }
+                    if (handleClickUI(o.children)) {
                         return true;
                     }
                     break;
@@ -884,29 +966,41 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         const ld = getOrCreateLayout(o);
         // for a click to be valid, both the initial touch down and the current position need
         // to be inside the element
-        return engine_1.clickX >= ld.x && engine_1.clickX <= ld.x + ld.w
-            && engine_1.clickY >= ld.y && engine_1.clickY <= ld.y + ld.h
-            && engine_1.mouseX >= ld.x && engine_1.mouseX <= ld.x + ld.w
-            && engine_1.mouseY >= ld.y && engine_1.mouseY <= ld.y + ld.h;
+        return ld.display !== 'none'
+            && engine_1.clickX >= ld.$x && engine_1.clickX <= ld.$x + ld.$w
+            && engine_1.clickY >= ld.$y && engine_1.clickY <= ld.$y + ld.$h
+            && engine_1.mouseX >= ld.$x && engine_1.mouseX <= ld.$x + ld.$w
+            && engine_1.mouseY >= ld.$y && engine_1.mouseY <= ld.$y + ld.$h;
     }
+    exports.isClickInside = isClickInside;
+    function isMouseInside(o) {
+        const ld = getOrCreateLayout(o);
+        return ld.display !== 'none'
+            && engine_1.mouseX >= ld.$x && engine_1.mouseX <= ld.$x + ld.$w
+            && engine_1.mouseY >= ld.$y && engine_1.mouseY <= ld.$y + ld.$h;
+    }
+    exports.isMouseInside = isMouseInside;
     function isScrollInside(o, isWheel) {
         const ld = getOrCreateLayout(o);
         if (isWheel) {
-            return engine_1.mouseX >= ld.x && engine_1.mouseX <= ld.x + ld.w
-                && engine_1.mouseY >= ld.y && engine_1.mouseY <= ld.y + ld.h;
+            return ld.display !== 'none'
+                && engine_1.mouseX >= ld.$x && engine_1.mouseX <= ld.$x + ld.$w
+                && engine_1.mouseY >= ld.$y && engine_1.mouseY <= ld.$y + ld.$h;
         }
         // touch devices: scroll should work for the element where the tap was initiated
         // even if the current position of the pointer is outside the scrolled element
-        return engine_1.clickX >= ld.x && engine_1.clickX <= ld.x + ld.w
-            && engine_1.clickY >= ld.y && engine_1.clickY <= ld.y + ld.h;
+        return ld.display !== 'none'
+            && engine_1.clickX >= ld.$x && engine_1.clickX <= ld.$x + ld.$w
+            && engine_1.clickY >= ld.$y && engine_1.clickY <= ld.$y + ld.$h;
     }
     function handleScrollUI(ui, deltaX, deltaY, isWheel) {
         for (const o of ui) {
             switch (o.kind) {
                 case 'text':
+                case 'image':
                 case 'button':
                     break;
-                case 'auto-container': {
+                case 'container': {
                     if (!isScrollInside(o, isWheel)) {
                         break;
                     }
@@ -932,6 +1026,15 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         return false;
     }
     exports.handleScrollUI = handleScrollUI;
+    function debugBoundingBox(ui) {
+        const lds = ui.map(getOrCreateLayout);
+        const x = Math.min(...lds.map(o => o.$x));
+        const y = Math.min(...lds.map(o => o.$y));
+        const right = Math.max(...lds.map(o => o.$x + o.$w));
+        const bottom = Math.max(...lds.map(o => o.$y + o.$h));
+        return { x, y, width: right - x, height: bottom - y };
+    }
+    exports.debugBoundingBox = debugBoundingBox;
 });
 define("editor", ["require", "exports", "engine", "util", "ui"], function (require, exports, engine_2, util_3, ui_1) {
     "use strict";
@@ -982,24 +1085,26 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     let toolsOffset;
     let smallScreen;
     let settings_toolSize;
-    let settings_buttons = new Set(['gridSize', 'noRows', 'delMode', 'undo', 'redo']);
+    let settings_multiselect;
+    let settings_buttons = new Set(['gridSize', 'noRows', 'delMode', 'multiselect', 'undo', 'redo']);
     let mouseDown = false;
     let deleteMode = false;
+    let multiselectMode = false;
     let settingsOpen = false;
     const GridSizes = [16, 24, 32, 48, 64, 80, 96, 128];
-    const AllButtons = ['gridSize', 'noRows', 'delMode', 'undo', 'redo'];
+    const AllButtons = ['gridSize', 'noRows', 'delMode', 'multiselect', 'undo', 'redo'];
     let tiles = [];
     let historyIndex = 0;
     let massHistoryStart;
     const history = [];
     let curAtlas = 'img/grass.png';
-    let currentTile;
+    let currentTiles;
     let ui = [];
     const styleContext = {
-        get height() {
+        get screenHeight() {
             return engine_2.height;
         },
-        get width() {
+        get screenWidth() {
             return engine_2.width;
         },
         get toolSize() {
@@ -1015,49 +1120,52 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     const styles = `
 
     .settings-container {
-        x: 5;
-        y: toolsOffset + 20;
-        w: width - 10;
-        h: height - toolsOffset - 30;
+        top: toolsOffset + 20;
+        left: 5;
+        width: screenWidth - 10;
+        height: screenHeight - toolsOffset - 30;
         gap: 15;
         scroll: 'y';
+        layoutMode: 'column';
     }
 
     #tiles-container {
-        x: 5;
-        y: toolsOffset + 10;
-        w: smallScreen ? width - 140 : width - 215;
-        h: height - toolsOffset - 10;
+        top: toolsOffset + 10;
+        left: 5;
+        width: smallScreen ? screenWidth - 140 : screenWidth - 215;
+        height: screenHeight - toolsOffset - 10;
         gap: 5;
+        layoutMode: 'row';
 
         scroll: 'x';
     }
 
     .tile {
-        w: toolSize;
-        h: toolSize;
+        width: toolSize;
+        height: toolSize;
     }
 
     .tile-active {
         ... .tile;
         borderColor: '#cc0909';
-        borderW: 2;
+        borderWidth: 2;
     }
 
     #tools-container {
-        x: smallScreen ? width - 125 : width - 200;
-        y: toolsOffset + 10;
+        top: toolsOffset + 10;
+        left: smallScreen ? screenWidth - 125 : screenWidth - 200;
         gap: 5;
+        layoutMode: 'row';
     }
 
     .small-button {
-        w: smallScreen ? 30 : 45;
-        h: smallScreen ? 14 : 21;
+        width: smallScreen ? 30 : 45;
+        height: smallScreen ? 14 : 21;
         color: 'darkgray';
         font: smallScreen ? '9px monospace' : '14px monospace';
-        borderW: 1;
+        borderWidth: 1;
         borderColor: 'darkgray';
-        textAlign: 'center';
+        align: 'center';
     }
 
     .small-button-active {
@@ -1067,21 +1175,22 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     }
 
     #atlas-list-container {
-        maxHeight: height - toolsOffset - 10 - (smallScreen ? 4 : 3);
+        maxHeight: screenHeight - toolsOffset - 10 - (smallScreen ? 4 : 3);
 
-        borderW: 1;
+        borderWidth: 1;
         borderColor: 'darkgray';
         scroll: 'y';
+        layoutMode: 'column';
     }
 
     .atlas-list-button {
-        w: smallScreen ? 89 : 149;
-        h: smallScreen ? 12 : 21;
-        borderW: 1;
+        width: smallScreen ? 89 : 149;
+        height: smallScreen ? 12 : 21;
+        borderWidth: 1;
         borderColor: 'darkgray';
         font: smallScreen ? '9px monospace' : '14px monospace';
         color: 'darkgray';
-        textAlign: 'right';
+        align: 'right';
     }
 
     .atlas-list-button-active {
@@ -1089,31 +1198,37 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         color: 'floralwhite';
     }
 
-    .gap5 {
+    .gap5-row {
         gap: 5;
+        layoutMode: 'row';
+    }
+
+    .gap5-column {
+        gap: 5;
+        layoutMode: 'column';
     }
 
     .settings-label {
         color: 'floralwhite';
         font: '16px monospace';
-        h: 21;
-        w: 150;
+        height: 21;
+        width: 150;
     }
 
     .checkbox {
-        borderW: 2;
+        borderWidth: 2;
         borderColor: 'grey';
         color: 'floralwhite';
         font: '16px monospace';
-        textAlign: 'center';
-        w: 20;
-        h: 20;
+        align: 'center';
+        width: 20;
+        height: 20;
     }
 
     .checkbox-label {
         color: 'darkgray';
         font: '14px monospace';
-        h: 21;
+        height: 21;
     }
 
     .checkbox-label-active {
@@ -1156,28 +1271,42 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     }
     exports.draw = draw;
     function beforeDraw() {
-        if (mouseDown && engine_2.clickY <= toolsOffset && engine_2.mouseY <= toolsOffset) {
-            const { x, y } = toTileCoordinates(engine_2.mouseX, engine_2.mouseY);
-            if (deleteMode) {
-                const toDelete = tiles.filter(t => t.x === x && t.y === y);
-                if (toDelete.length) {
-                    executeAction({ kind: 'delete-tiles', tiles: toDelete });
-                }
-                return;
+        handleMouseDraw();
+        multiselectMode = settings_multiselect ?? !!engine_2.pressedKeys.META;
+        if (dragging) {
+            dragging.style.left = engine_2.mouseX + draggingDx;
+            dragging.style.top = engine_2.mouseY + draggingDy;
+        }
+    }
+    function handleMouseDraw() {
+        if (!mouseDown || engine_2.clickY >= toolsOffset || engine_2.mouseY >= toolsOffset) {
+            return;
+        }
+        const { x, y } = toTileCoordinates(engine_2.mouseX, engine_2.mouseY);
+        if (deleteMode) {
+            const toDelete = tiles.filter(t => t.x === x && t.y === y);
+            if (toDelete.length) {
+                executeAction({ kind: 'delete-tiles', tiles: toDelete });
             }
-            if (!currentTile) {
-                return;
-            }
-            // check if this exact tile is already present at this location
-            const existing = tiles.find(t => t.x === x
-                && t.y === y
-                && t.atlas === curAtlas
-                && t.atlasX === currentTile.x
-                && t.atlasY === currentTile.y);
-            if (!existing) {
-                const tile = { x, y, atlasX: currentTile.x, atlasY: currentTile.y, atlas: curAtlas };
-                executeAction({ kind: 'add-tiles', tiles: [tile] });
-            }
+            return;
+        }
+        if (!currentTiles) {
+            return;
+        }
+        // check if this exact tile is already present at this location
+        const existing = tiles.some(t => t.x === x
+            && t.y === y
+            && t.atlas === curAtlas
+            && currentTiles.some(c => t.atlasY === c.x && t.atlasY === c.y));
+        if (!existing) {
+            const tiles = currentTiles.map(t => ({
+                x: x + t.dx,
+                y: y + t.dy,
+                atlasX: t.x,
+                atlasY: t.y,
+                atlas: curAtlas
+            }));
+            executeAction({ kind: 'add-tiles', tiles });
         }
     }
     function drawLoading() {
@@ -1229,20 +1358,25 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             const deleteIcon = loadedAtlases['img/delete.png'];
             engine_2.ctx.drawImage(deleteIcon, engine_2.mouseX - 16, engine_2.mouseY - 16, 32, 32);
         }
-        if (currentTile && !deleteMode) {
+        if (currentTiles && !deleteMode) {
             const x = Math.floor(engine_2.mouseX / gridSize) * gridSize;
             const y = Math.floor(engine_2.mouseY / gridSize) * gridSize;
             const atlas = loadedAtlases[curAtlas];
+            const alpha = engine_2.ctx.globalAlpha;
             engine_2.ctx.globalAlpha = 0.75;
-            engine_2.ctx.drawImage(atlas, currentTile.x * sliceSize, currentTile.y * sliceSize, sliceSize, sliceSize, x, y, gridSize, gridSize);
-            engine_2.ctx.globalAlpha = 1;
+            for (const t of currentTiles) {
+                engine_2.ctx.drawImage(atlas, t.x * sliceSize, t.y * sliceSize, sliceSize, sliceSize, x + t.dx * gridSize, y + t.dy * gridSize, gridSize, gridSize);
+            }
+            engine_2.ctx.globalAlpha = alpha;
         }
     }
     function onEscape() {
         deleteMode = false;
-        currentTile = undefined;
+        currentTiles = undefined;
+        settings_multiselect = undefined;
     }
     function onMouseUp(e) {
+        dragging = undefined;
         mouseDown = false;
         if (massHistoryStart !== undefined) {
             aggregateHistory(massHistoryStart, historyIndex);
@@ -1255,7 +1389,16 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             return;
         }
     }
+    let dragging;
+    let draggingDx;
+    let draggingDy;
     function onMouseDown(e) {
+        if ((0, ui_1.isClickInside)(popUp)) {
+            dragging = popUp;
+            draggingDx = popUp.style.left - engine_2.mouseX;
+            draggingDy = popUp.style.top - engine_2.mouseY;
+            return;
+        }
         mouseDown = true;
         // can happen if the non-primary button is pressed
         if (massHistoryStart !== undefined) {
@@ -1285,16 +1428,16 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             return;
         }
         ui = settingsOpen
-            ? [settingsContainer]
+            ? [settingsContainer, popUp]
             : [
                 createToolsContainer(),
                 createAtlasTiles(tileRows),
+                popUp
             ];
     }
     function createToolsContainer() {
         const container = {
-            kind: 'auto-container',
-            mode: 'row',
+            kind: 'container',
             children: [createSmallTools(), createAtlasList()],
             style: '#tools-container',
         };
@@ -1341,6 +1484,19 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             deleteMode = !deleteMode;
         }
     };
+    const multiselectModeButton = {
+        kind: 'button',
+        get style() {
+            return multiselectMode ? '.small-button-active' : '.small-button';
+        },
+        inner: {
+            kind: 'text',
+            text: 'MUL',
+        },
+        onClick: () => {
+            settings_multiselect = settings_multiselect ? undefined : true;
+        }
+    };
     const undoButton = {
         kind: 'button',
         style: '.small-button',
@@ -1377,13 +1533,13 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         gridSize: zoomButton,
         noRows: tileRowsButton,
         delMode: deleteModeButton,
+        multiselect: multiselectModeButton,
         undo: undoButton,
         redo: redoButton,
     };
     function createSmallTools() {
         return {
-            kind: 'auto-container',
-            mode: 'column',
+            kind: 'container',
             children: [
                 ...AllButtons.flatMap(btn => settings_buttons.has(btn) ? [smallButtons[btn]] : []),
                 settingsButton
@@ -1391,14 +1547,15 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             style: {
                 gap: 5,
                 scroll: 'y',
-                get maxHeight() { return engine_2.height - toolsOffset - 20; }
+                get maxHeight() { return engine_2.height - toolsOffset - 20; },
+                layoutMode: 'column'
             },
         };
     }
     ;
     const toolSizeRow = {
-        kind: 'auto-container',
-        mode: 'row',
+        kind: 'container',
+        style: { layoutMode: 'row' },
         children: [
             {
                 kind: 'text',
@@ -1406,9 +1563,8 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                 style: '.settings-label'
             },
             {
-                kind: 'auto-container',
-                mode: 'row',
-                style: 'gap5',
+                kind: 'container',
+                style: { layoutMode: 'row' },
                 children: [
                     {
                         kind: 'button',
@@ -1441,8 +1597,8 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         ],
     };
     const availableButtons = {
-        kind: 'auto-container',
-        mode: 'row',
+        kind: 'container',
+        style: { layoutMode: 'row' },
         children: [
             {
                 kind: 'text',
@@ -1450,9 +1606,8 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                 style: '.settings-label'
             },
             {
-                kind: 'auto-container',
-                mode: 'row',
-                style: { gap: 20 },
+                kind: 'container',
+                style: { gap: 20, layoutMode: 'row' },
                 children: AllButtons.map(btn => {
                     const checkbox = {
                         kind: 'button',
@@ -1480,9 +1635,8 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                         }
                     };
                     return {
-                        kind: 'auto-container',
-                        mode: 'row',
-                        style: { gap: 8 },
+                        kind: 'container',
+                        style: { gap: 8, layoutMode: 'row' },
                         children: [checkbox, label],
                     };
                 }),
@@ -1490,8 +1644,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         ],
     };
     const settingsContainer = {
-        kind: 'auto-container',
-        mode: 'column',
+        kind: 'container',
         style: '.settings-container',
         children: [
             toolSizeRow,
@@ -1502,11 +1655,103 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                     kind: 'text',
                     text: 'Close',
                 },
-                style: { borderW: 1, borderColor: 'darkgray', color: 'darkgray' },
+                style: { borderWidth: 1, borderColor: 'darkgray', color: 'darkgray' },
                 onClick: () => { settingsOpen = false, regenerateUI(); }
             }
         ],
     };
+    const popUp = {
+        kind: 'container',
+        id: 'pop-up',
+        children: [
+            {
+                kind: 'container',
+                children: [
+                    {
+                        kind: 'button',
+                        inner: {
+                            kind: 'text',
+                            text: '_',
+                        },
+                        onClick: () => { minimised = !minimised; }
+                    },
+                    {
+                        kind: 'button',
+                        inner: {
+                            kind: 'text',
+                            text: 'X',
+                        },
+                        onClick: () => {
+                            popUp.style.display = 'none';
+                        }
+                    }
+                ],
+                style: { width: 300, height: 30, borderWidth: 2, borderColor: 'grey', layoutMode: 'row' }
+            },
+            {
+                kind: 'container',
+                get children() {
+                    if (!selectedStyle) {
+                        return Object.getOwnPropertyNames(ui_1.styles).map(st => {
+                            return {
+                                kind: 'button',
+                                id: 'btn-' + st,
+                                inner: { kind: 'text', text: st },
+                                onClick: () => {
+                                    selectedStyle = st;
+                                    selectedStyleChildren = createSelectedStyleUI();
+                                }
+                            };
+                        });
+                    }
+                    return selectedStyleChildren;
+                },
+                style: { layoutMode: 'column', get display() { return minimised ? 'none' : 'visible'; } }
+            },
+        ],
+        style: { top: 100, left: 100, width: 300, borderWidth: 2, borderColor: 'grey', backgroundColor: 'black', scroll: 'y', layoutMode: 'column', },
+    };
+    let minimised = false;
+    let selectedStyle;
+    let selectedStyleChildren;
+    const width100 = { width: 100 };
+    const backButton = { borderWidth: 1, borderColor: 'darkgray' };
+    function createSelectedStyleUI() {
+        const style = ui_1.styles[selectedStyle];
+        return [
+            ...Object.getOwnPropertyNames(style).map(name => {
+                const prefix = 'ac-' + selectedStyle + '-' + name;
+                return {
+                    kind: 'container',
+                    id: prefix + '-row',
+                    style: { layoutMode: 'row' },
+                    children: [
+                        {
+                            kind: 'text',
+                            id: prefix + '-label',
+                            text: name + ':',
+                            style: width100
+                        },
+                        {
+                            kind: 'text',
+                            id: prefix + '-value',
+                            text: String(style[name])
+                        }
+                    ]
+                };
+            }),
+            {
+                kind: 'button',
+                id: 'back-btn',
+                inner: { kind: 'text', text: 'Back' },
+                style: backButton,
+                onClick: () => {
+                    selectedStyle = undefined;
+                    selectedStyleChildren = undefined;
+                },
+            }
+        ];
+    }
     function createAtlasList() {
         const list = atlasPaths.map(path => {
             const text = path
@@ -1523,8 +1768,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             return button;
         });
         const container = {
-            kind: 'auto-container',
-            mode: 'column',
+            kind: 'container',
             children: list,
             style: '#atlas-list-container',
         };
@@ -1532,7 +1776,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     }
     function onAtlasButtonClick(path) {
         curAtlas = path;
-        currentTile = undefined;
+        currentTiles = undefined;
         regenerateUI();
     }
     function createAtlasTiles(nRows) {
@@ -1550,7 +1794,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             const btn = {
                 kind: 'button',
                 get style() {
-                    return currentTile === data ? '.tile-active' : '.tile';
+                    return currentTiles?.some(t => t.x === data.x && t.y === data.y) ? '.tile-active' : '.tile';
                 },
                 inner: {
                     kind: 'image',
@@ -1565,28 +1809,25 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             currRow.push(btn);
             if (i % ac === ac - 1) {
                 const container = {
-                    kind: 'auto-container',
-                    mode: 'row',
+                    kind: 'container',
                     children: currRow,
-                    style: '.gap5',
+                    style: '.gap5-row',
                 };
                 rows.push(container);
                 currRow = [];
             }
             if (rows.length === nRows || i === count - 1) {
                 const container = {
-                    kind: 'auto-container',
-                    mode: 'column',
+                    kind: 'container',
                     children: rows,
-                    style: '.gap5',
+                    style: '.gap5-column',
                 };
                 cols.push(container);
                 rows = [];
             }
         }
         const container = {
-            kind: 'auto-container',
-            mode: 'row',
+            kind: 'container',
             children: cols,
             style: '#tiles-container',
         };
@@ -1594,9 +1835,32 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     }
     function onAtlasTileClick(data) {
         deleteMode = false;
-        currentTile = currentTile === data
-            ? undefined
-            : data;
+        if (!currentTiles || !multiselectMode) {
+            const existing = currentTiles?.some(t => t.x === data.x && t.y === data.y);
+            currentTiles = existing
+                ? undefined
+                : [{ x: data.x, y: data.y, dx: 0, dy: 0 }];
+            return;
+        }
+        const idx = currentTiles.findIndex(t => t.x === data.x && t.y === data.y);
+        if (idx !== -1) {
+            currentTiles.splice(idx, 1);
+            currentTiles = currentTiles.length ? currentTiles : undefined;
+            return;
+        }
+        currentTiles.push({ x: data.x, y: data.y, dx: 0, dy: 0 });
+        const xySets = currentTiles
+            .reduce((acc, t) => {
+            acc.xs.add(t.x);
+            acc.ys.add(t.y);
+            return acc;
+        }, { xs: new Set, ys: new Set });
+        const xs = [...xySets.xs].toSorted((x, y) => x - y);
+        const ys = [...xySets.ys].toSorted((x, y) => x - y);
+        for (const t of currentTiles) {
+            t.dx = xs.indexOf(t.x);
+            t.dy = ys.indexOf(t.y);
+        }
     }
     function loadAtlases() {
         let leftToLoad = assetPaths.length;
@@ -1714,75 +1978,16 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         historyIndex = history.length;
     }
 });
-define("game", ["require", "exports", "engine"], function (require, exports, engine_3) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.draw = exports.tearDown = exports.setup = void 0;
-    let loading = true;
-    const image = new Image();
-    image.onload = () => loading = false;
-    image.src = 'img/grass.png';
-    let playerX;
-    let playerY;
-    let playerSpeed = 200;
-    function setup() {
-        playerX = engine_3.width / 2;
-        playerY = engine_3.height / 2;
-    }
-    exports.setup = setup;
-    function tearDown() {
-    }
-    exports.tearDown = tearDown;
-    function draw(dt) {
-        engine_3.ctx.clearRect(0, 0, engine_3.width, engine_3.height);
-        if (loading) {
-            drawLoading();
-            return;
-        }
-        tick(dt);
-        drawBackground();
-        drawPlayer();
-    }
-    exports.draw = draw;
-    function tick(dt) {
-        const dx = engine_3.pressedKeys.RIGHT ? dt :
-            engine_3.pressedKeys.LEFT ? -dt : 0;
-        const dy = engine_3.pressedKeys.DOWN ? dt :
-            engine_3.pressedKeys.UP ? -dt : 0;
-        playerX += dx * playerSpeed / 1000;
-        playerY += dy * playerSpeed / 1000;
-    }
-    function drawLoading() {
-        engine_3.ctx.fillStyle = '#34495E';
-        engine_3.ctx.font = '32px serif';
-        const dots = (Date.now() % 1000) / 250 | 0;
-        const dims = engine_3.ctx.measureText(`Loading ...`);
-        engine_3.ctx.fillText(`Loading ${'.'.repeat(dots)}`, (engine_3.width - dims.width) / 2, (engine_3.height - dims.fontBoundingBoxAscent) / 2);
-    }
-    function drawBackground() {
-        const h = 192;
-        const w = 192;
-        for (let i = 0; i < engine_3.height; i += h) {
-            for (let j = 0; j < engine_3.width; j += w) {
-                engine_3.ctx.drawImage(image, j, i, w, h);
-            }
-        }
-    }
-    function drawPlayer() {
-        engine_3.ctx.fillStyle = '#FFF';
-        engine_3.ctx.fillRect(playerX - 20, playerY - 20, 20, 20);
-    }
-});
-define("index", ["require", "exports", "editor", "engine"], function (require, exports, Game, engine_4) {
+define("index", ["require", "exports", "editor", "engine"], function (require, exports, Game, engine_3) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     Game = __importStar(Game);
     let KbShortcuts = [
-        [engine_4.toggleDebug, '['],
+        [engine_3.toggleDebug, '['],
     ];
     window.onload = function () {
-        (0, engine_4.setup)();
-        (0, engine_4.registerShortcuts)(KbShortcuts);
-        (0, engine_4.setGameObject)(Game);
+        (0, engine_3.setup)();
+        (0, engine_3.registerShortcuts)(KbShortcuts);
+        (0, engine_3.setGameObject)(Game);
     };
 });
