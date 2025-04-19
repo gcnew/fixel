@@ -53,14 +53,14 @@ export type UIStyle = {
     align?: 'left' | 'right' | 'center',
     verticalAlign?: 'top' | 'center' | 'bottom',
 
-    borderWidth?: number | string,
+    borderWidth?: number | string | Partial<TRBL>,
     borderColor?: string,
 
     backgroundColor?: string | undefined,
     display?: 'none' | 'hidden' | 'visible',
 
-    margin?: number | string,
-    padding?: number | string,
+    margin?: number | string | Partial<TRBL>,
+    padding?: number | string | Partial<TRBL>,
 
     gap?: number | string,
     layoutMode?: 'column' | 'row',
@@ -256,21 +256,25 @@ function calcContainerBox(o: UIContainer) {
     ld.scrollHeight = ld.layoutMode === 'row'
         ? o.children.reduce((acc, x) => {
             const cl = getOrCreateLayout(x);
-            return cl.display === 'none' ? acc : Math.max(acc, cl.$h);
+            const h = cl.$h + cl.margin.top + cl.margin.bottom;
+            return cl.display === 'none' ? acc : Math.max(acc, h);
         }, 0)
         : o.children.reduce((acc, x) => {
             const cl = getOrCreateLayout(x);
-            return cl.display === 'none' ? acc : acc + cl.$h + (acc ? ld.gap.row : 0);
+            const h = cl.$h + cl.margin.top + cl.margin.bottom;
+            return cl.display === 'none' ? acc : acc + h + (acc ? ld.gap.row : 0);
         }, 0);
 
     ld.scrollWidth = ld.layoutMode === 'row'
         ? o.children.reduce((acc, x) => {
             const cl = getOrCreateLayout(x);
-            return cl.display === 'none' ? acc : acc + cl.$w + (acc ? ld.gap.column : 0);
+            const w = cl.$w + cl.margin.left + cl.margin.right;
+            return cl.display === 'none' ? acc : acc + w + (acc ? ld.gap.column : 0);
         }, 0)
         : o.children.reduce((acc, x) => {
             const cl = getOrCreateLayout(x);
-            return cl.display === 'none' ? acc : Math.max(acc, cl.$w);
+            const w = cl.$w + cl.margin.left + cl.margin.right;
+            return cl.display === 'none' ? acc : Math.max(acc, w);
         }, 0);
 
     ld.$w = Math.min(
@@ -349,6 +353,11 @@ function drawUI(ui: UI[]) {
 
 function drawText(o: UIText) {
     const ld = getOrCreateLayout(o);
+
+    if (ld.backgroundColor) {
+        ctx.fillStyle = ld.backgroundColor;
+        ctx.fillRect(ld.$x, ld.$y, ld.$w, ld.$h);
+    }
 
     ctx.fillStyle = ld.color;
     ctx.font = ld.font;
@@ -509,14 +518,15 @@ const zeroTRBL: TRBL = {
     left: 0,
 };
 
+type TRBLCacheCell = { key: string | number | Partial<TRBL>, value: TRBL }
 function createLayoutData(style: UIStyle | undefined): LayoutData {
     const res: LayoutData & {
         $$x: number | undefined,
         $$y: number | undefined,
 
-        $borderWidth: { key: string | number, value: TRBL },
-        $margin: { key: string | number, value: TRBL },
-        $padding: { key: string | number, value: TRBL },
+        $borderWidth: TRBLCacheCell,
+        $margin: TRBLCacheCell,
+        $padding: TRBLCacheCell,
         $gap: { key: string | number, value: { row: number, column: number } }
     } = {
         $$x: undefined,
@@ -579,7 +589,7 @@ function createLayoutData(style: UIStyle | undefined): LayoutData {
     return res;
 }
 
-function cacheTRBL(property: string, cache: { key: string | number, value: TRBL }, key: string|number): TRBL {
+function cacheTRBL(property: string, cache: TRBLCacheCell, key: TRBLCacheCell['key']): TRBL {
     if (cache.key === key) {
         return cache.value;
     }
@@ -587,6 +597,18 @@ function cacheTRBL(property: string, cache: { key: string | number, value: TRBL 
     if (typeof key === 'number') {
         cache.key = key;
         cache.value = { top: key, right: key, bottom: key, left: key };
+
+        return cache.value;
+    }
+
+    if (typeof key === 'object') {
+        cache.key = key;
+        cache.value = {
+            get top() { return key.top ?? 0 },
+            get right() { return key.right ?? 0 },
+            get bottom() { return key.bottom ?? 0 },
+            get left() { return key.left ?? 0 },
+        };
 
         return cache.value;
     }
@@ -742,4 +764,14 @@ export function handleScrollUI(ui: UI[], deltaX: number, deltaY: number, isWheel
     }
 
     return false;
+}
+
+export function debugBoundingBox(ui: UI[]) {
+    const lds = ui.map(getOrCreateLayout);
+    const x = Math.min(... lds.map(o => o.$x));
+    const y = Math.min(... lds.map(o => o.$y));
+    const right = Math.max(... lds.map(o => o.$x + o.$w));
+    const bottom = Math.max(... lds.map(o => o.$y + o.$h));
+
+    return { x, y, width: right - x, height: bottom - y };
 }

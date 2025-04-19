@@ -3,3 +3,5 @@ built/*
 testbed.html
 fwee
 .DS_Store
+node_modules
+test-results
