@@ -21,10 +21,36 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
-define("keyboard", ["require", "exports"], function (require, exports) {
+define("util", ["require", "exports"], function (require, exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.normaliseShortcut = exports.KeyMap = void 0;
+    exports.assertNever = exports.onlyKey = exports.uuid = exports.clamp = exports.isTruthy = void 0;
+    function isTruthy(x) {
+        return !!x;
+    }
+    exports.isTruthy = isTruthy;
+    function clamp(x, min, max) {
+        return Math.max(min, Math.min(x, max));
+    }
+    exports.clamp = clamp;
+    function uuid() {
+        return crypto.randomUUID();
+    }
+    exports.uuid = uuid;
+    function onlyKey(x) {
+        const keys = Object.keys(x);
+        return keys.length === 1 ? keys[0] : undefined;
+    }
+    exports.onlyKey = onlyKey;
+    function assertNever(x) {
+        throw new Error(`Not a never ${JSON.stringify(x)}`);
+    }
+    exports.assertNever = assertNever;
+});
+define("keyboard", ["require", "exports", "util"], function (require, exports, util_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.keyToSigil = exports.normaliseShortcut = exports.KeyMap = void 0;
     exports.KeyMap = {
         F1: 'F1',
         F2: 'F2',
@@ -117,43 +143,30 @@ define("keyboard", ["require", "exports"], function (require, exports) {
             .join('+');
     }
     exports.normaliseShortcut = normaliseShortcut;
+    function keyToSigil(k) {
+        return [
+            k.metaKey && 'META',
+            k.ctrlKey && 'CTRL',
+            k.altKey && 'ALT',
+            k.shiftKey && 'SHIFT',
+            exports.KeyMap[k.code] || k.code
+        ]
+            .filter(util_1.isTruthy)
+            .join('+');
+    }
+    exports.keyToSigil = keyToSigil;
 });
-define("util", ["require", "exports"], function (require, exports) {
+define("engine", ["require", "exports", "keyboard", "util"], function (require, exports, keyboard_1, util_2) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.assertNever = exports.onlyKey = exports.uuid = exports.clamp = exports.isTruthy = void 0;
-    function isTruthy(x) {
-        return !!x;
-    }
-    exports.isTruthy = isTruthy;
-    function clamp(x, min, max) {
-        return Math.max(min, Math.min(x, max));
-    }
-    exports.clamp = clamp;
-    function uuid() {
-        return crypto.randomUUID();
-    }
-    exports.uuid = uuid;
-    function onlyKey(x) {
-        const keys = Object.keys(x);
-        return keys.length === 1 ? keys[0] : undefined;
-    }
-    exports.onlyKey = onlyKey;
-    function assertNever(x) {
-        throw new Error(`Not a never ${JSON.stringify(x)}`);
-    }
-    exports.assertNever = assertNever;
-});
-define("engine", ["require", "exports", "keyboard", "util"], function (require, exports, keyboard_1, util_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.removeDebugMsg = exports.addDebugMsg = exports.raise = exports.unlisten = exports.listen = exports.toggleRun = exports.toggleDebug = exports.removeShortcuts = exports.registerShortcuts = exports.setGameObject = exports.setup = exports.isMac = exports.clickY = exports.clickX = exports.mouseY = exports.mouseX = exports.pressedKeys = exports.debug = exports.height = exports.width = exports.ctx = exports.canvas = void 0;
+    exports.removeDebugMsg = exports.addDebugMsg = exports.raise = exports.unlisten = exports.listen = exports.toggleRun = exports.toggleDebug = exports.removeShortcuts = exports.registerShortcuts = exports.setGameObject = exports.setup = exports.isMac = exports.clickY = exports.clickX = exports.mouseY = exports.mouseX = exports.pressedKeys = exports.dt = exports.lastT = exports.debug = exports.height = exports.width = exports.ctx = exports.canvas = void 0;
     let game;
     let drawGame;
     exports.debug = false;
     const frameWindow = 1000;
     let frameRateBuffer = [];
-    let lastT = 0;
+    exports.lastT = 0;
+    exports.dt = 0;
     let gameStop = false;
     exports.pressedKeys = {};
     exports.isMac = /Mac/.test(navigator.userAgent);
@@ -181,15 +194,7 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
                 }
                 return;
             }
-            const sigil = [
-                e.metaKey && 'META',
-                e.ctrlKey && 'CTRL',
-                e.altKey && 'ALT',
-                e.shiftKey && 'SHIFT',
-                keyboard_1.KeyMap[e.code] || e.code
-            ]
-                .filter(util_1.isTruthy)
-                .join('+');
+            const sigil = (0, keyboard_1.keyToSigil)(e);
             const handler = KbShortcuts.get(sigil);
             if (handler && (!e.repeat || handler.repeat)) {
                 handler.fn();
@@ -199,8 +204,8 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
         });
         window.addEventListener('mousemove', e => {
             // TODO: should clip left/top too (e.g. if the canvas is in the middle of the screen)
-            exports.mouseX = (0, util_1.clamp)(e.pageX, 0, exports.width);
-            exports.mouseY = (0, util_1.clamp)(e.pageY, 0, exports.height);
+            exports.mouseX = (0, util_2.clamp)(e.pageX, 0, exports.width);
+            exports.mouseY = (0, util_2.clamp)(e.pageY, 0, exports.height);
         });
         exports.canvas.addEventListener('mousedown', e => {
             if (e.button !== 0) {
@@ -320,6 +325,23 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
             e.preventDefault();
         }
         exports.pressedKeys[code] = true;
+        const customEvent = {
+            kind: 'keydown',
+            key: {
+                altKey: e.altKey,
+                metaKey: e.metaKey,
+                shiftKey: e.shiftKey,
+                ctrlKey: e.ctrlKey,
+                code: e.code,
+                key: e.key,
+                repeat: e.repeat,
+            },
+            preventDefault: false
+        };
+        raise(customEvent);
+        if (customEvent.preventDefault) {
+            e.preventDefault();
+        }
     }
     function keyupListener(e) {
         const code = keyboard_1.KeyMap[e.code] || e.code;
@@ -372,7 +394,7 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
         exports.ctx.font = '10px monospace';
         const msg = DebugMessages
             .map(f => f())
-            .filter(util_1.isTruthy);
+            .filter(util_2.isTruthy);
         for (let i = 0; i < msg.length; ++i) {
             exports.ctx.fillText(msg[i], exports.width - 130, (i + 1) * 10);
         }
@@ -383,10 +405,10 @@ define("engine", ["require", "exports", "keyboard", "util"], function (require, 
         frameRateBuffer.splice(0, frameRateBuffer.length - frames);
     }
     function draw(t) {
-        const dt = t - lastT;
-        lastT = t;
-        updateFrameStats(dt);
-        drawGame(dt);
+        exports.dt = t - exports.lastT;
+        exports.lastT = t;
+        updateFrameStats(exports.dt);
+        drawGame(exports.dt);
         exports.debug && drawDebug();
         if (!gameStop) {
             window.requestAnimationFrame(draw);
@@ -512,10 +534,10 @@ define("mini-css", ["require", "exports"], function (require, exports) {
         return { name: x.name, extends: x.extends, props: finalProps };
     }
 });
-define("ui", ["require", "exports", "engine", "mini-css", "util"], function (require, exports, engine_1, mini_css_1, util_2) {
+define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], function (require, exports, engine_1, mini_css_1, keyboard_2, util_3) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.debugBoundingBox = exports.handleScrollUI = exports.isMouseInside = exports.isClickInside = exports.handleClickUI = exports.drawUI = exports.addAtlasesUI = exports.addStylesUI = exports.displayBoundingBoxes = exports.styles = void 0;
+    exports.debugBoundingBox = exports.handleKeyDown = exports.handleScrollUI = exports.isMouseInside = exports.isClickInside = exports.handleClickUI = exports.loseFocus = exports.handleMouseDown = exports.drawUI = exports.addAtlasesUI = exports.addStylesUI = exports.displayBoundingBoxes = exports.styles = exports.focusedInput = void 0;
     const defaultStyle = {
         top: 0,
         left: 0,
@@ -535,11 +557,17 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         gap: 0,
         scroll: undefined,
     };
+    let focusedId;
     exports.styles = {};
     const loadedAtlases = {};
     const idMap = new WeakMap();
     const layoutCache = new Map();
     let displayBoundingBoxes = false;
+    let _mouseX;
+    let _mouseY;
+    let _clickX;
+    let mouseDx;
+    let mouseDy;
     function accessDisplayBoundingBoxes(val) {
         if (typeof val === 'boolean') {
             displayBoundingBoxes = val;
@@ -557,14 +585,36 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
     }
     exports.addAtlasesUI = addAtlasesUI;
     function layoutDraw(ui) {
+        beforeDraw(ui);
         const baseline = engine_1.ctx.textBaseline;
         engine_1.ctx.textBaseline = 'top';
+        // update the `focusedInput` object on every draw cycle, as the element reference
+        // might change; the element is replaced by an element with the same `id`
+        const focusCache = exports.focusedInput;
+        exports.focusedInput = undefined;
         calcBoxes(ui);
         layout(ui);
         drawUI(ui);
+        if (!exports.focusedInput && focusCache) {
+            exports.focusedInput = focusCache;
+            loseFocus();
+        }
         engine_1.ctx.textBaseline = baseline;
     }
     exports.drawUI = layoutDraw;
+    function beforeDraw(ui) {
+        mouseDx = _mouseX - engine_1.mouseX;
+        mouseDy = _mouseY - engine_1.mouseY;
+        _mouseX = engine_1.mouseX;
+        _mouseY = engine_1.mouseY;
+        // TODO ...
+        mouseDx;
+        mouseDy;
+        if (engine_1.clickX !== undefined && _clickX === undefined) {
+            handleMouseDown(ui);
+        }
+        _clickX = engine_1.clickX;
+    }
     function calcBoxes(ui) {
         for (const o of ui) {
             const ld = getOrCreateLayout(o);
@@ -575,6 +625,9 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                 case 'text':
                     calcTextBox(o);
                     break;
+                case 'text-input':
+                    calcTextInputBox(o);
+                    break;
                 case 'image':
                     calcImageBox(o);
                     break;
@@ -584,7 +637,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                 case 'container':
                     calcContainerBox(o);
                     break;
-                default: (0, util_2.assertNever)(o);
+                default: (0, util_3.assertNever)(o);
             }
         }
     }
@@ -592,6 +645,19 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         const ld = getOrCreateLayout(o);
         engine_1.ctx.font = ld.font;
         const dims = engine_1.ctx.measureText(o.text);
+        ld.textMetrics = dims;
+        ld.$w = ld.style?.width ?? (dims.width + ld.padding.left + ld.padding.right);
+        ld.$h = ld.style?.height ?? (dims.fontBoundingBoxDescent + ld.padding.top + ld.padding.bottom);
+    }
+    function calcTextInputBox(o) {
+        const ld = getOrCreateLayout(o);
+        // TODO: this might be better placed in `layout`
+        if (ld.id === focusedId && o.kind === 'text-input') {
+            exports.focusedInput = o;
+        }
+        engine_1.ctx.font = ld.font;
+        const text = o.edit?.text ?? o.text;
+        const dims = engine_1.ctx.measureText(text);
         ld.textMetrics = dims;
         ld.$w = ld.style?.width ?? (dims.width + ld.padding.left + ld.padding.right);
         ld.$h = ld.style?.height ?? (dims.fontBoundingBoxDescent + ld.padding.top + ld.padding.bottom);
@@ -647,8 +713,8 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             }, 0);
         ld.$w = Math.min(ld.style?.width ?? (ld.scrollWidth + ld.padding.left + ld.padding.right), ld.style?.maxWidth ?? Infinity);
         ld.$h = Math.min(ld.style?.height ?? (ld.scrollHeight + ld.padding.top + ld.padding.bottom), ld.style?.maxHeight ?? Infinity);
-        ld.scrollX = (0, util_2.clamp)(ld.scrollX, Math.min(ld.$w, ld.scrollWidth) - ld.scrollWidth, 0);
-        ld.scrollY = (0, util_2.clamp)(ld.scrollY, Math.min(ld.$h, ld.scrollHeight) - ld.scrollHeight, 0);
+        ld.scrollX = (0, util_3.clamp)(ld.scrollX, Math.min(ld.$w, ld.scrollWidth) - ld.scrollWidth, 0);
+        ld.scrollY = (0, util_3.clamp)(ld.scrollY, Math.min(ld.$h, ld.scrollHeight) - ld.scrollHeight, 0);
     }
     function layout(ui) {
         for (const o of ui) {
@@ -660,10 +726,11 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                 case 'text': break;
                 case 'image': break;
                 case 'button': break;
+                case 'text-input': break;
                 case 'container':
                     layoutContainer(o);
                     break;
-                default: (0, util_2.assertNever)(o);
+                default: (0, util_3.assertNever)(o);
             }
         }
     }
@@ -696,6 +763,9 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                 case 'text':
                     drawText(o);
                     break;
+                case 'text-input':
+                    drawTextInput(o);
+                    break;
                 case 'image':
                     drawImage(o);
                     break;
@@ -705,7 +775,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                 case 'container':
                     drawContainer(o);
                     break;
-                default: (0, util_2.assertNever)(o);
+                default: (0, util_3.assertNever)(o);
             }
         }
     }
@@ -718,6 +788,35 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         engine_1.ctx.fillStyle = ld.color;
         engine_1.ctx.font = ld.font;
         engine_1.ctx.fillText(o.text, ld.$x + ld.padding.left, ld.$y + ld.padding.top);
+        drawBoundingBox(ld);
+    }
+    function drawTextInput(o) {
+        const ld = getOrCreateLayout(o);
+        if (ld.backgroundColor) {
+            engine_1.ctx.fillStyle = ld.backgroundColor;
+            engine_1.ctx.fillRect(ld.$x, ld.$y, ld.$w + 20, ld.$h);
+        }
+        if (o === exports.focusedInput && o.edit?.selection) {
+            const prefix = o.edit.text.slice(0, o.edit.selection.start);
+            const offset = engine_1.ctx.measureText(prefix).width;
+            const selected = o.edit.text.slice(o.edit.selection.start, o.edit.selection.end);
+            const width = engine_1.ctx.measureText(selected).width;
+            engine_1.ctx.fillStyle = 'rgb(180,215,255)';
+            engine_1.ctx.fillRect(ld.$x + ld.padding.left + offset, ld.$y + ld.padding.top - 2, width, ld.$h - 2);
+        }
+        const text = o.edit?.text ?? o.text;
+        engine_1.ctx.fillStyle = ld.color;
+        engine_1.ctx.font = ld.font;
+        engine_1.ctx.fillText(text, ld.$x + ld.padding.left, ld.$y + ld.padding.top);
+        if (o === exports.focusedInput && o.edit) {
+            const prefix = o.edit.text.slice(0, o.edit.cursor);
+            const offset = engine_1.ctx.measureText(prefix).width;
+            const isOdd = engine_1.lastT / 500 & 1;
+            if (isOdd) {
+                engine_1.ctx.fillStyle = ld.color;
+                engine_1.ctx.fillRect(ld.$x + ld.padding.left + offset, ld.$y + ld.padding.top - 2, 1, ld.$h + 4);
+            }
+        }
         drawBoundingBox(ld);
     }
     function drawImage(o) {
@@ -814,7 +913,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
     function getOrCreateLayout(o) {
         let id = o.id ?? idMap.get(o);
         if (id === undefined) {
-            id = (0, util_2.uuid)();
+            id = (0, util_3.uuid)();
             idMap.set(o, id);
         }
         const existing = layoutCache.get(id);
@@ -824,7 +923,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         const style = typeof o.style === 'string'
             ? exports.styles[o.style]
             : o.style;
-        const ld = createLayoutData(style);
+        const ld = createLayoutData(id, style);
         layoutCache.set(id, { style: o.style, layout: ld });
         return ld;
     }
@@ -834,13 +933,14 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         bottom: 0,
         left: 0,
     };
-    function createLayoutData(style) {
+    function createLayoutData(id, style) {
         const res = {
-            $$x: undefined,
-            $$y: undefined,
+            id,
             style,
+            $$x: undefined,
             get $x() { return this.$$x ?? style?.left ?? defaultStyle.left; },
             set $x(val) { this.$$x = val; },
+            $$y: undefined,
             get $y() { return this.$$y ?? style?.top ?? defaultStyle.top; },
             set $y(val) { this.$$y = val; },
             $w: 0,
@@ -934,15 +1034,70 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
         cache.value = { row: parsed[0], column: parsed[1] };
         return cache.value;
     }
-    function handleClickUI(ui) {
+    function handleMouseDown(ui) {
+        // losing focus should happend before the other events
+        if (exports.focusedInput && !isMouseInside(exports.focusedInput)) {
+            loseFocus();
+        }
+        return handleMouseDownWorker(ui);
+    }
+    exports.handleMouseDown = handleMouseDown;
+    function handleMouseDownWorker(ui) {
         for (const o of ui) {
             switch (o.kind) {
                 case 'text':
                 case 'image':
+                case 'button':
                     break;
+                case 'text-input': {
+                    if (!isMouseInside(o)) {
+                        break;
+                    }
+                    if (exports.focusedInput !== o) {
+                        loseFocus();
+                        exports.focusedInput = o;
+                        focusedId = o.id ?? idMap.get(o);
+                        if (!exports.focusedInput.edit) {
+                            exports.focusedInput.edit = {
+                                text: exports.focusedInput.text,
+                                cursor: exports.focusedInput.text.length,
+                                selection: undefined
+                            };
+                        }
+                    }
+                    return true;
+                }
+                case 'container': {
+                    if (!isMouseInside(o)) {
+                        break;
+                    }
+                    if (handleMouseDownWorker(o.children)) {
+                        return true;
+                    }
+                    break;
+                }
+                default: (0, util_3.assertNever)(o);
+            }
+        }
+        return false;
+    }
+    function loseFocus() {
+        if (exports.focusedInput?.edit) {
+            exports.focusedInput.edit = undefined;
+        }
+        focusedId = undefined;
+        exports.focusedInput = undefined;
+    }
+    exports.loseFocus = loseFocus;
+    function handleClickUI(ui) {
+        for (const o of ui) {
+            switch (o.kind) {
+                case 'text':
+                case 'text-input':
+                case 'image':
                 case 'button': {
-                    if (isClickInside(o)) {
-                        o.onClick(o);
+                    if (o.onClick && isClickInside(o)) {
+                        o.onClick(o); // TYH: ts can't figure out the relation, lol
                         return true;
                     }
                     break;
@@ -954,9 +1109,13 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                     if (handleClickUI(o.children)) {
                         return true;
                     }
+                    if (o.onClick) {
+                        o.onClick(o);
+                        return true;
+                    }
                     break;
                 }
-                default: (0, util_2.assertNever)(o);
+                default: (0, util_3.assertNever)(o);
             }
         }
         return false;
@@ -998,6 +1157,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
             switch (o.kind) {
                 case 'text':
                 case 'image':
+                case 'text-input':
                 case 'button':
                     break;
                 case 'container': {
@@ -1020,12 +1180,268 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
                     }
                     return true;
                 }
-                default: (0, util_2.assertNever)(o);
+                default: (0, util_3.assertNever)(o);
             }
         }
         return false;
     }
     exports.handleScrollUI = handleScrollUI;
+    // todo:
+    // - support {option,ctrl}+{backspace,delete}
+    // - support word hopping in non-latin
+    // - history
+    // - scrolling
+    // - mobile support?
+    // - Windows / Linux keybindings
+    function handleKeyDown(_ui, key) {
+        if (!exports.focusedInput || !exports.focusedInput.edit) {
+            return false;
+        }
+        const sigil = (0, keyboard_2.keyToSigil)(key);
+        const edit = exports.focusedInput.edit;
+        switch (sigil) {
+            case 'META+LEFT':
+            case 'UP': {
+                edit.cursor = 0;
+                edit.selection = undefined;
+                return true;
+            }
+            case 'META+SHIFT+LEFT':
+            case 'SHIFT+UP': {
+                if (edit.selection) {
+                    edit.selection.start = 0;
+                }
+                else if (edit.cursor !== 0) {
+                    edit.selection = {
+                        start: 0,
+                        end: edit.cursor
+                    };
+                }
+                edit.cursor = 0;
+                return true;
+            }
+            case 'META+RIGHT':
+            case 'DOWN': {
+                edit.cursor = edit.text.length;
+                edit.selection = undefined;
+                return true;
+            }
+            case 'META+SHIFT+RIGHT':
+            case 'SHIFT+DOWN': {
+                if (edit.selection) {
+                    edit.selection.end = edit.text.length;
+                }
+                else if (edit.cursor !== edit.text.length) {
+                    edit.selection = {
+                        start: edit.cursor,
+                        end: edit.text.length
+                    };
+                }
+                edit.cursor = edit.text.length;
+                return true;
+            }
+            case 'LEFT': {
+                edit.cursor = edit.selection
+                    ? edit.selection.start
+                    : Math.max(edit.cursor - 1, 0);
+                edit.selection = undefined;
+                return false;
+            }
+            case 'SHIFT+LEFT': {
+                if (edit.selection) {
+                    if (edit.cursor === edit.selection.start) {
+                        edit.cursor = Math.max(edit.cursor - 1, 0);
+                        edit.selection.start = edit.cursor;
+                    }
+                    else if (edit.cursor === edit.selection.end) {
+                        edit.cursor = Math.max(edit.cursor - 1, 0);
+                        edit.selection.end = edit.cursor;
+                    }
+                    if (edit.selection.start === edit.selection.end) {
+                        edit.selection = undefined;
+                    }
+                }
+                else {
+                    if (edit.cursor !== 0 && edit.text.length !== 0) {
+                        edit.cursor--;
+                        edit.selection = {
+                            start: edit.cursor,
+                            end: edit.cursor + 1
+                        };
+                    }
+                }
+                return false;
+            }
+            case 'CTRL+LEFT':
+            case 'CTRL+SHIFT+LEFT':
+            case 'ALT+LEFT':
+            case 'ALT+SHIFT+LEFT': {
+                const rx = key.altKey
+                    ? /\w+\s*$/
+                    : /[a-zA-Z0-9]+_*\s*$/;
+                const prefix = edit.text.slice(0, edit.cursor);
+                const offset = rx.exec(prefix)?.[0].length
+                    ?? /(.)\1*\s*$/.exec(prefix)?.[0].length
+                    ?? 1;
+                const saved = edit.cursor;
+                edit.cursor = Math.max(edit.cursor - offset, 0);
+                if (key.shiftKey) {
+                    if (edit.selection) {
+                        if (edit.selection.end === saved && edit.cursor >= edit.selection.start) {
+                            edit.selection.end = edit.cursor;
+                        }
+                        else {
+                            edit.selection.start = edit.cursor;
+                        }
+                        if (edit.selection.start === edit.selection.end) {
+                            edit.selection = undefined;
+                        }
+                    }
+                    else {
+                        edit.selection = edit.cursor !== saved
+                            ? { start: edit.cursor, end: saved }
+                            : undefined;
+                    }
+                }
+                else {
+                    edit.selection = undefined;
+                }
+                return false;
+            }
+            case 'RIGHT': {
+                edit.cursor = edit.selection
+                    ? edit.selection.end
+                    : Math.min(edit.cursor + 1, edit.text.length);
+                edit.selection = undefined;
+                return false;
+            }
+            case 'SHIFT+RIGHT': {
+                if (edit.selection) {
+                    if (edit.cursor === edit.selection.start) {
+                        edit.cursor = Math.min(edit.cursor + 1, edit.text.length);
+                        edit.selection.start = edit.cursor;
+                    }
+                    else if (edit.cursor === edit.selection.end) {
+                        edit.cursor = Math.min(edit.cursor + 1, edit.text.length);
+                        edit.selection.end = edit.cursor;
+                    }
+                    if (edit.selection.start === edit.selection.end) {
+                        edit.selection = undefined;
+                    }
+                }
+                else {
+                    if (edit.cursor !== edit.text.length) {
+                        edit.cursor++;
+                        edit.selection = {
+                            start: edit.cursor - 1,
+                            end: edit.cursor
+                        };
+                    }
+                }
+                return false;
+            }
+            case 'CTRL+RIGHT':
+            case 'CTRL+SHIFT+RIGHT':
+            case 'ALT+RIGHT':
+            case 'ALT+SHIFT+RIGHT': {
+                const rx = key.altKey
+                    ? /^\s*\w+/
+                    : /^\s*_*[a-zA-Z0-9]+/;
+                const suffix = edit.text.slice(edit.cursor);
+                const offset = rx.exec(suffix)?.[0].length
+                    ?? /^\s*(.)\1*/.exec(suffix)?.[0].length
+                    ?? 1;
+                const saved = edit.cursor;
+                edit.cursor = Math.min(edit.cursor + offset, edit.text.length);
+                if (key.shiftKey) {
+                    if (edit.selection) {
+                        if (edit.selection.start === saved && edit.cursor <= edit.selection.end) {
+                            edit.selection.start = edit.cursor;
+                        }
+                        else {
+                            edit.selection.end = edit.cursor;
+                        }
+                        if (edit.selection.start === edit.selection.end) {
+                            edit.selection = undefined;
+                        }
+                    }
+                    else {
+                        edit.selection = edit.cursor !== saved
+                            ? { start: saved, end: edit.cursor }
+                            : undefined;
+                    }
+                }
+                else {
+                    edit.selection = undefined;
+                }
+                return false;
+            }
+            case 'META+DELETE': {
+                edit.text = edit.text.slice(0, edit.cursor);
+                edit.selection = undefined;
+                return false;
+            }
+            case 'META+BACKSPACE': {
+                edit.text = edit.text.slice(edit.cursor);
+                edit.cursor = 0;
+                edit.selection = undefined;
+                return false;
+            }
+            case 'DELETE':
+            case 'BACKSPACE': {
+                if (edit.selection) {
+                    edit.cursor = edit.selection.start;
+                    edit.text = edit.text.slice(0, edit.selection.start) + edit.text.slice(edit.selection.end);
+                    edit.selection = undefined;
+                }
+                else if (sigil === 'BACKSPACE' && edit.cursor !== 0) {
+                    edit.cursor = edit.cursor - 1;
+                    edit.text = edit.text.slice(0, edit.cursor) + edit.text.slice(edit.cursor + 1);
+                }
+                else if (sigil === 'DELETE' && edit.cursor < edit.text.length) {
+                    edit.text = edit.text.slice(0, edit.cursor) + edit.text.slice(edit.cursor + 1);
+                }
+                return false;
+            }
+            case 'ESC': {
+                loseFocus();
+                return false;
+            }
+            case 'META+C': {
+                if (edit.selection) {
+                    const selected = edit.text.slice(edit.selection.start, edit.selection.end);
+                    navigator.clipboard.writeText(selected);
+                }
+                return false;
+            }
+            case 'META+V': {
+                // This is not entirely correct as it will happen sometime in the future due to the promise
+                // i.e. there is a race condition, but I think it's good enough as is
+                navigator.clipboard
+                    .readText()
+                    .then(text => {
+                    const start = edit.selection ? edit.selection.start : edit.cursor;
+                    const end = edit.selection ? edit.selection.end : edit.cursor;
+                    edit.text = edit.text.slice(0, start) + text + edit.text.slice(end);
+                    edit.cursor = edit.cursor + text.length;
+                    edit.selection = undefined;
+                });
+                return false;
+            }
+            default: {
+                // accept only characters
+                if (key.key.length === 1) {
+                    const start = edit.selection ? edit.selection.start : edit.cursor;
+                    const end = edit.selection ? edit.selection.end : edit.cursor;
+                    edit.text = edit.text.slice(0, start) + key.key + edit.text.slice(end);
+                    edit.cursor = start + 1;
+                    edit.selection = undefined;
+                }
+                return false;
+            }
+        }
+    }
+    exports.handleKeyDown = handleKeyDown;
     function debugBoundingBox(ui) {
         const lds = ui.map(getOrCreateLayout);
         const x = Math.min(...lds.map(o => o.$x));
@@ -1036,7 +1452,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "util"], function (req
     }
     exports.debugBoundingBox = debugBoundingBox;
 });
-define("editor", ["require", "exports", "engine", "util", "ui"], function (require, exports, engine_2, util_3, ui_1) {
+define("editor", ["require", "exports", "engine", "util", "ui"], function (require, exports, engine_2, util_4, ui_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.draw = exports.tearDown = exports.setup = void 0;
@@ -1127,6 +1543,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         gap: 15;
         scroll: 'y';
         layoutMode: 'column';
+        test: 'AAAJJJTTTTg';
     }
 
     #tiles-container {
@@ -1241,6 +1658,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         (0, engine_2.listen)('mouseup', onMouseUp);
         (0, engine_2.listen)('mousedown', onMouseDown);
         (0, engine_2.listen)('resize', onResize);
+        (0, engine_2.listen)('keydown', onKeyDown);
         engine_2.canvas.addEventListener('wheel', onScrollListener);
         addTouchListeners();
         (0, ui_1.addStylesUI)(styleContext, styles);
@@ -1393,7 +1811,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     let draggingDx;
     let draggingDy;
     function onMouseDown(e) {
-        if ((0, ui_1.isClickInside)(popUp)) {
+        if ((0, ui_1.isClickInside)(popupHeader)) {
             dragging = popUp;
             draggingDx = popUp.style.left - engine_2.mouseX;
             draggingDy = popUp.style.top - engine_2.mouseY;
@@ -1420,8 +1838,11 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         if ((0, ui_1.handleScrollUI)(ui, e.deltaX, e.deltaY, true)) {
             return;
         }
-        const idx = (0, util_3.clamp)(GridSizes.indexOf(gridSize) + (e.deltaY > 0 ? 1 : -1), 0, GridSizes.length - 1);
+        const idx = (0, util_4.clamp)(GridSizes.indexOf(gridSize) + (e.deltaY > 0 ? 1 : -1), 0, GridSizes.length - 1);
         gridSize = GridSizes[idx];
+    }
+    function onKeyDown(e) {
+        e.preventDefault = (0, ui_1.handleKeyDown)(ui, e.key);
     }
     function regenerateUI() {
         if (loading) {
@@ -1660,34 +2081,35 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             }
         ],
     };
+    const popupHeader = {
+        kind: 'container',
+        children: [
+            {
+                kind: 'button',
+                inner: {
+                    kind: 'text',
+                    text: '_',
+                },
+                onClick: () => { minimised = !minimised; }
+            },
+            {
+                kind: 'button',
+                inner: {
+                    kind: 'text',
+                    text: 'X',
+                },
+                onClick: () => {
+                    popUp.style.display = 'none';
+                }
+            }
+        ],
+        style: { width: 300, height: 30, borderWidth: 2, borderColor: 'grey', layoutMode: 'row' }
+    };
     const popUp = {
         kind: 'container',
         id: 'pop-up',
         children: [
-            {
-                kind: 'container',
-                children: [
-                    {
-                        kind: 'button',
-                        inner: {
-                            kind: 'text',
-                            text: '_',
-                        },
-                        onClick: () => { minimised = !minimised; }
-                    },
-                    {
-                        kind: 'button',
-                        inner: {
-                            kind: 'text',
-                            text: 'X',
-                        },
-                        onClick: () => {
-                            popUp.style.display = 'none';
-                        }
-                    }
-                ],
-                style: { width: 300, height: 30, borderWidth: 2, borderColor: 'grey', layoutMode: 'row' }
-            },
+            popupHeader,
             {
                 kind: 'container',
                 get children() {
@@ -1720,29 +2142,30 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         const style = ui_1.styles[selectedStyle];
         return [
             ...Object.getOwnPropertyNames(style).map(name => {
-                const prefix = 'ac-' + selectedStyle + '-' + name;
+                const self = {
+                    kind: 'text-input',
+                    text: String(style[name]),
+                    style: {
+                        get backgroundColor() { return self === ui_1.focusedInput ? 'floralwhite' : undefined; },
+                        get color() { return self === ui_1.focusedInput ? 'black' : undefined; },
+                        get padding() { return self === ui_1.focusedInput ? '3 2 2 2' : undefined; },
+                    }
+                };
                 return {
                     kind: 'container',
-                    id: prefix + '-row',
                     style: { layoutMode: 'row' },
                     children: [
                         {
                             kind: 'text',
-                            id: prefix + '-label',
                             text: name + ':',
                             style: width100
                         },
-                        {
-                            kind: 'text',
-                            id: prefix + '-value',
-                            text: String(style[name])
-                        }
+                        self
                     ]
                 };
             }),
             {
                 kind: 'button',
-                id: 'back-btn',
                 inner: { kind: 'text', text: 'Back' },
                 style: backButton,
                 onClick: () => {
@@ -1945,7 +2368,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                 tiles = tiles.filter(x => !action.tiles.includes(x));
                 return;
             }
-            default: (0, util_3.assertNever)(action);
+            default: (0, util_4.assertNever)(action);
         }
     }
     function revertAction(action) {
@@ -1958,7 +2381,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                 tiles.push(...action.tiles);
                 return;
             }
-            default: (0, util_3.assertNever)(action);
+            default: (0, util_4.assertNever)(action);
         }
     }
     function aggregateHistory(start, end) {
