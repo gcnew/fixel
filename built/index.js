@@ -136,9 +136,10 @@ define("keyboard", ["require", "exports", "util"], function (require, exports, u
         return sc
             .toUpperCase()
             .split(/\s*\+\s*/g)
-            .sort(x => {
-            const idx = prio.indexOf(x);
-            return idx !== -1 ? idx : x.charCodeAt(0);
+            .sort((x, y) => {
+            const idx1 = prio.indexOf(x) === -1 ? x.charCodeAt(0) : prio.indexOf(x);
+            const idx2 = prio.indexOf(y) === -1 ? y.charCodeAt(0) : prio.indexOf(y);
+            return idx1 - idx2;
         })
             .join('+');
     }
