@@ -15,7 +15,7 @@ shopt -s extglob
 tsc
 
 # clean up unnecessary files
-rm -rf src test .gitignore tsconfig.json package.json package-lock.json README.md
+rm -rf src test script .gitignore tsconfig.json package.json package-lock.json README.md
 echo '.DS_Store' > .gitignore
 echo 'node_modules' >> .gitignore
 
