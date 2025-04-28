@@ -9,13 +9,15 @@ import {
 } from './engine'
 
 import { clamp, assertNever } from './util'
-import type { Shortcut } from './keyboard'
+import type { KbShortcut } from './keyboard'
 import {
     UI, Button, UIText, UIContainer, UIStyle,
 
-    drawUI, handleScrollUI, handleClickUI, addStylesUI, addAtlasesUI, displayBoundingBoxes, styles as compiledStyles,
+    drawUI, addStylesUI, addAtlasesUI, displayBoundingBoxes, styles as compiledStyles,
 
-    isClickInside
+    handleScrollUI, handleClickUI, handleKeyDown,
+
+    focusedInput, isClickInside
 } from './ui'
 
 
@@ -27,7 +29,7 @@ type SelectedTile = { x: number, y: number, dx: number, dy: number }
 
 const META_KEY = isMac ? 'META' : 'CTRL';
 
-const KbShortcuts: Shortcut[] = [
+const KbShortcuts: KbShortcut[] = [
     [onEscape,    'ESC'],
     [historyUndo, `${META_KEY} + Z`,          true],
     [historyRedo, `${META_KEY} + SHIFT + Z`,  true],
@@ -132,6 +134,7 @@ const styles = `
         gap: 15;
         scroll: 'y';
         layoutMode: 'column';
+        test: 'AAAJJJTTTTg';
     }
 
     #tiles-container {
@@ -249,6 +252,7 @@ export function setup() {
     listen('mouseup', onMouseUp);
     listen('mousedown', onMouseDown);
     listen('resize', onResize);
+    listen('keydown', onKeyDown);
 
     canvas.addEventListener('wheel', onScrollListener);
     addTouchListeners();
@@ -443,7 +447,7 @@ let dragging: UI | undefined;
 let draggingDx: number;
 let draggingDy: number;
 function onMouseDown(e: Extract<VEvent, { kind: 'mousedown' }>) {
-    if (isClickInside(popUp)) {
+    if (isClickInside(popupHeader)) {
         dragging = popUp;
         draggingDx = (popUp.style as UIStyle).left! - mouseX;
         draggingDy = (popUp.style as UIStyle).top! - mouseY;
@@ -480,6 +484,10 @@ function onScrollListener(e: WheelEvent) {
 
     const idx = clamp(GridSizes.indexOf(gridSize) + (e.deltaY > 0 ? 1 : -1), 0, GridSizes.length - 1);
     gridSize = GridSizes[idx]!;
+}
+
+function onKeyDown(e: Extract<VEvent, { kind: 'keydown' }>) {
+    e.preventDefault = handleKeyDown(ui, e.key);
 }
 
 function regenerateUI() {
@@ -741,34 +749,36 @@ const settingsContainer: UIContainer = {
     ],
 };
 
+const popupHeader: UI = {
+    kind: 'container',
+    children: [
+        {
+            kind: 'button',
+            inner: {
+                kind: 'text',
+                text: '_',
+            },
+            onClick: () => { minimised = !minimised; }
+        },
+        {
+            kind: 'button',
+            inner: {
+                kind: 'text',
+                text: 'X',
+            },
+            onClick: () => {
+                (popUp.style as UIStyle).display = 'none';
+            }
+        }
+    ],
+    style: { width: 300, height: 30, borderWidth: 2, borderColor: 'grey', layoutMode: 'row' }
+};
 const popUp: UIContainer = {
     kind: 'container',
     id: 'pop-up',
     children: [
-        {
-            kind: 'container',
-            children: [
-                {
-                    kind: 'button',
-                    inner: {
-                        kind: 'text',
-                        text: '_',
-                    },
-                    onClick: () => { minimised = !minimised; }
-                },
-                {
-                    kind: 'button',
-                    inner: {
-                        kind: 'text',
-                        text: 'X',
-                    },
-                    onClick: () => {
-                        (popUp.style as UIStyle).display = 'none';
-                    }
-                }
-            ],
-            style: { width: 300, height: 30, borderWidth: 2, borderColor: 'grey', layoutMode: 'row' }
-        },
+        popupHeader,
+
         {
             kind: 'container',
             get children() {
@@ -803,32 +813,32 @@ function createSelectedStyleUI(): UI[] {
     const style = compiledStyles[selectedStyle!]!;
     return [
         ... Object.getOwnPropertyNames(style).map<UI>(name => {
-
-            const prefix =  'ac-' + selectedStyle + '-' + name;
+            const self: UI = {
+                kind: 'text-input',
+                text: String(style[name as keyof UIStyle]),
+                style: {
+                    get backgroundColor() { return self === focusedInput ? 'floralwhite' : undefined },
+                    get color()           { return self === focusedInput ? 'black' : undefined as any as string },
+                    get padding()         { return self === focusedInput ? '3 2 2 2' : undefined as any },
+                }
+            };
 
             return {
                 kind: 'container',
-                id: prefix + '-row',
                 style: { layoutMode: 'row' },
                 children: [
                     {
                         kind: 'text',
-                        id: prefix + '-label',
                         text: name + ':',
                         style: width100
                     },
-                    {
-                        kind: 'text',
-                        id: prefix + '-value',
-                        text: String(style[name as keyof UIStyle])
-                    }
+                    self
                 ]
-            };
+            } satisfies UI;
         }),
 
         {
             kind: 'button',
-            id: 'back-btn',
             inner: { kind: 'text', text: 'Back' },
             style: backButton,
             onClick: () => {

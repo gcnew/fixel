@@ -1,4 +1,19 @@
 
+import { isTruthy } from './util'
+
+export type KbShortcut = [fn: () => void, keys: string, repeat?: boolean]
+
+export type KbKey = {
+    altKey: boolean;
+    metaKey: boolean;
+    shiftKey: boolean;
+    ctrlKey: boolean;
+
+    code: string;
+    key: string;
+    repeat: boolean;
+}
+
 export const KeyMap = {
     F1:           'F1',
     F2:           'F2',
@@ -86,8 +101,6 @@ export const KeyMap = {
     Slash:        '/',
 } as const;
 
-export type Shortcut = [fn: () => void, keys: string, repeat?: boolean]
-
 export function normaliseShortcut(sc: string) {
     const prio = [ 'META', 'CTRL', 'ALT', 'SHIFT' ];
 
@@ -98,5 +111,17 @@ export function normaliseShortcut(sc: string) {
             const idx = prio.indexOf(x);
             return idx !== -1 ? idx : x.charCodeAt(0);
         })
+        .join('+');
+}
+
+export function keyToSigil(k: KbKey): string /* typeof KeyMap[keyof typeof KeyMap] */ {
+    return [
+            k.metaKey  && 'META',
+            k.ctrlKey  && 'CTRL',
+            k.altKey   && 'ALT',
+            k.shiftKey && 'SHIFT',
+            KeyMap[k.code as keyof typeof KeyMap] || k.code
+        ]
+        .filter(isTruthy)
         .join('+');
 }

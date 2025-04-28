@@ -1,5 +1,9 @@
 
-import { Shortcut, KeyMap, normaliseShortcut } from './keyboard'
+import {
+    type KbKey, type KbShortcut,
+
+    KeyMap, normaliseShortcut, keyToSigil,
+} from './keyboard'
 
 import { Falsy, clamp, isTruthy } from './util'
 
@@ -22,7 +26,8 @@ export let debug: boolean = false;
 const frameWindow = 1000;
 let   frameRateBuffer: number[] = [];
 
-let lastT: number = 0;
+export let lastT: number = 0;
+export let dt: number = 0;
 
 let gameStop = false;
 
@@ -40,6 +45,7 @@ let KbShortcuts: Map<string, { fn: () => void, repeat: boolean }> = new Map();
 
 export type VEvent = { kind: 'mouseup',   clickX: number, clickY: number, button: 'primary' | 'secondary' }
                    | { kind: 'mousedown', clickX: number, clickY: number, button: 'primary' | 'secondary', preventDefault: boolean }
+                   | { kind: 'keydown',   key: KbKey, preventDefault: boolean }
                    | { kind: 'resize' }
 
 const eventRegistry: { [E in VEvent['kind']]?: ((e: Extract<VEvent, { kind: E }>) => void)[] } = {};
@@ -72,16 +78,7 @@ export function setup() {
             return;
         }
 
-        const sigil = [
-                e.metaKey  && 'META',
-                e.ctrlKey  && 'CTRL',
-                e.altKey   && 'ALT',
-                e.shiftKey && 'SHIFT',
-                KeyMap[e.code as keyof typeof KeyMap] || e.code
-            ]
-            .filter(isTruthy)
-            .join('+');
-
+        const sigil = keyToSigil(e);
         const handler = KbShortcuts.get(sigil);
         if (handler && (!e.repeat || handler.repeat)) {
             handler.fn();
@@ -165,14 +162,14 @@ export function setGameObject(newGame: GameObj) {
     resize();
 }
 
-export function registerShortcuts(shortcuts: Shortcut[]) {
+export function registerShortcuts(shortcuts: KbShortcut[]) {
     for (const [fn, sc, repeat] of shortcuts) {
         const fixed = normaliseShortcut(sc);
         KbShortcuts.set(fixed, { fn, repeat: repeat ?? false });
     }
 }
 
-export function removeShortcuts(shortcuts: Shortcut[]) {
+export function removeShortcuts(shortcuts: KbShortcut[]) {
     for (const [_, sc] of shortcuts) {
         const fixed = normaliseShortcut(sc);
         KbShortcuts.delete(fixed);
@@ -233,6 +230,26 @@ function keydownListener(e: KeyboardEvent) {
     }
 
     pressedKeys[code] = true;
+
+    const customEvent: VEvent = {
+        kind: 'keydown',
+        key: {
+            altKey: e.altKey,
+            metaKey: e.metaKey,
+            shiftKey: e.shiftKey,
+            ctrlKey: e.ctrlKey,
+
+            code: e.code,
+            key: e.key,
+            repeat: e.repeat,
+        },
+        preventDefault: false
+    };
+    raise(customEvent);
+
+    if (customEvent.preventDefault) {
+        e.preventDefault();
+    }
 }
 
 function keyupListener(e: KeyboardEvent) {
@@ -314,7 +331,7 @@ function updateFrameStats(dt: number) {
 }
 
 function draw(t: number) {
-    const dt = t - lastT;
+    dt = t - lastT;
     lastT = t;
 
     updateFrameStats(dt);

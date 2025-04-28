@@ -1,10 +1,10 @@
 
 import * as Game from './editor'
 
-import { Shortcut } from './keyboard'
+import { KbShortcut } from './keyboard'
 import { setup, setGameObject, registerShortcuts, toggleDebug } from './engine'
 
-let KbShortcuts: Shortcut[] = [
+let KbShortcuts: KbShortcut[] = [
     [toggleDebug,  '['],
 ];
 

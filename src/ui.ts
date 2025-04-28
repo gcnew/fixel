@@ -1,36 +1,34 @@
 
 import {
     ctx,
-    mouseX, mouseY, clickX, clickY
+    lastT, mouseX, mouseY, clickX, clickY,
 } from './engine'
 
 import { compileStyle } from './mini-css'
-
+import { type KbKey, keyToSigil } from './keyboard'
 import { uuid, clamp, assertNever } from './util'
 
 export type UI = UIText
+               | UITextInput
                | UIImage
                | UIButton
                | UIContainer
 
-export type UIContainer = {
+type Focusable = UITextInput
+
+export interface UIContainer extends UIBase<UIContainer> {
     kind: 'container',
-    id?: string,
-    style?: string | UIStyle,
     children: UI[],
 }
 
-export type UIText = {
+export interface UIText extends UIBase<UIText> {
     kind: 'text',
-    id?: string,
-    style?: string | UIStyle,
     text: string,
+    onChange?: (self: UITextInput, newText: string) => void,
 }
 
-export type UIImage = {
+export interface UIImage extends UIBase<UIImage> {
     kind: 'image',
-    id?: string,
-    style?: string | UIStyle,
     src: string,
     x?: number,
     y?: number,
@@ -38,7 +36,37 @@ export type UIImage = {
     height?: number
 }
 
-export type UIStyle = {
+export type EditData = {
+    text: string,
+    cursor: number,
+    selection: undefined | {
+        start: number,
+        end: number
+    },
+}
+
+export interface UITextInput extends UIBase<UITextInput> {
+    kind: 'text-input',
+    text: string,
+    edit?: EditData
+}
+
+export type ImageSlice = { kind: 'image', src: string, dx: number, dy: number, w: number, h: number }
+export type TextProps  = { kind: 'text', text: string }
+
+export { UIButton as Button }
+export interface UIButton extends UIBase<UIButton> {
+    kind: 'button',
+    inner: ImageSlice | TextProps
+}
+
+export interface UIBase<T> {
+    id?: string,
+    style?: string | UIStyle,
+    onClick?: (self: T) => void,
+}
+
+export interface UIStyle {
     top?: number,
     left?: number,
 
@@ -67,19 +95,8 @@ export type UIStyle = {
     scroll?: 'x' | 'y' | undefined,
 }
 
-export type ImageSlice = { kind: 'image', src: string, dx: number, dy: number, w: number, h: number }
-export type TextProps  = { kind: 'text', text: string }
-
-export { UIButton as Button }
-export type UIButton = {
-    kind: 'button',
-    id?: string,
-    style?: string | UIStyle,
-    inner: ImageSlice | TextProps,
-    onClick: (self: UIButton) => void,
-}
-
 type LayoutData = {
+    id: string,
     style: UIStyle | undefined,
 
     $x: number,
@@ -148,6 +165,8 @@ const defaultStyle: Required<OmitOwn<UIStyle, 'width' | 'height'>> = {
     scroll: undefined,
 };
 
+let focusedId: string | undefined;
+export let focusedInput: Focusable | undefined;
 
 export const styles: ReturnType<typeof compileStyle<UIStyle>> = {};
 
@@ -157,6 +176,13 @@ const idMap = new WeakMap<UI, string>();
 const layoutCache = new Map<string, { style: UI['style'], layout: LayoutData }>();
 
 let displayBoundingBoxes = false;
+
+let _mouseX: number;
+let _mouseY: number;
+let _clickX: number | undefined;
+
+let mouseDx: number;
+let mouseDy: number;
 
 export { accessDisplayBoundingBoxes as displayBoundingBoxes }
 function accessDisplayBoundingBoxes(val?: boolean): boolean {
@@ -178,14 +204,45 @@ export function addAtlasesUI(atlases: typeof loadedAtlases) {
 
 export { layoutDraw as drawUI }
 function layoutDraw(ui: UI[]) {
+
+    beforeDraw(ui);
+
     const baseline = ctx.textBaseline;
     ctx.textBaseline = 'top';
+
+    // update the `focusedInput` object on every draw cycle, as the element reference
+    // might change; the element is replaced by an element with the same `id`
+    const focusCache = focusedInput;
+    focusedInput = undefined;
 
     calcBoxes(ui);
     layout(ui);
     drawUI(ui);
 
+    if (!focusedInput && focusCache) {
+        focusedInput = focusCache;
+        loseFocus();
+    }
+
     ctx.textBaseline = baseline;
+}
+
+function beforeDraw(ui: UI[]) {
+    mouseDx = _mouseX - mouseX;
+    mouseDy = _mouseY - mouseY;
+
+    _mouseX = mouseX;
+    _mouseY = mouseY;
+
+    // TODO ...
+    mouseDx;
+    mouseDy;
+
+    if (clickX !== undefined && _clickX === undefined) {
+        handleMouseDown(ui);
+    }
+
+    _clickX = clickX;
 }
 
 function calcBoxes(ui: UI[]) {
@@ -196,10 +253,12 @@ function calcBoxes(ui: UI[]) {
         }
 
         switch (o.kind) {
-            case 'text':      calcTextBox(o);      break;
-            case 'image':     calcImageBox(o);     break;
-            case 'button':    calcButtonBox(o);    break;
-            case 'container': calcContainerBox(o); break;
+            case 'text':       calcTextBox(o);      break;
+            case 'text-input': calcTextInputBox(o); break;
+
+            case 'image':      calcImageBox(o);     break;
+            case 'button':     calcButtonBox(o);    break;
+            case 'container':  calcContainerBox(o); break;
 
             default: assertNever(o);
         }
@@ -212,6 +271,23 @@ function calcTextBox(o: UIText) {
     ctx.font = ld.font;
 
     const dims = ctx.measureText(o.text);
+    ld.textMetrics = dims;
+    ld.$w = ld.style?.width ?? (dims.width + ld.padding.left + ld.padding.right);
+    ld.$h = ld.style?.height ?? (dims.fontBoundingBoxDescent + ld.padding.top + ld.padding.bottom);
+}
+
+function calcTextInputBox(o: UITextInput) {
+    const ld = getOrCreateLayout(o);
+
+    // TODO: this might be better placed in `layout`
+    if (ld.id === focusedId && o.kind === 'text-input') {
+        focusedInput = o;
+    }
+
+    ctx.font = ld.font;
+
+    const text = o.edit?.text ?? o.text;
+    const dims = ctx.measureText(text);
     ld.textMetrics = dims;
     ld.$w = ld.style?.width ?? (dims.width + ld.padding.left + ld.padding.right);
     ld.$h = ld.style?.height ?? (dims.fontBoundingBoxDescent + ld.padding.top + ld.padding.bottom);
@@ -298,10 +374,11 @@ function layout(ui: UI[]) {
         }
 
         switch (o.kind) {
-            case 'text':      break;
-            case 'image':     break;
-            case 'button':    break;
-            case 'container': layoutContainer(o); break;
+            case 'text':       break;
+            case 'image':      break;
+            case 'button':     break;
+            case 'text-input': break;
+            case 'container':  layoutContainer(o); break;
 
             default: assertNever(o);
         }
@@ -341,10 +418,11 @@ function drawUI(ui: UI[]) {
         }
 
         switch (o.kind) {
-            case 'text':      drawText(o);      break;
-            case 'image':     drawImage(o);     break;
-            case 'button':    drawButton(o);    break;
-            case 'container': drawContainer(o); break;
+            case 'text':       drawText(o);      break;
+            case 'text-input': drawTextInput(o); break;
+            case 'image':      drawImage(o);     break;
+            case 'button':     drawButton(o);    break;
+            case 'container':  drawContainer(o); break;
 
             default: assertNever(o);
         }
@@ -362,6 +440,54 @@ function drawText(o: UIText) {
     ctx.fillStyle = ld.color;
     ctx.font = ld.font;
     ctx.fillText(o.text, ld.$x + ld.padding.left, ld.$y + ld.padding.top);
+
+    drawBoundingBox(ld);
+}
+
+function drawTextInput(o: UITextInput) {
+    const ld = getOrCreateLayout(o);
+
+    if (ld.backgroundColor) {
+        ctx.fillStyle = ld.backgroundColor;
+        ctx.fillRect(ld.$x, ld.$y, ld.$w + 20, ld.$h);
+    }
+
+    if (o === focusedInput && o.edit?.selection) {
+        const prefix = o.edit.text.slice(0, o.edit.selection.start);
+        const offset = ctx.measureText(prefix).width;
+
+        const selected = o.edit.text.slice(o.edit.selection.start, o.edit.selection.end);
+        const width = ctx.measureText(selected).width;
+
+        ctx.fillStyle = 'rgb(180,215,255)';
+        ctx.fillRect(
+            ld.$x + ld.padding.left + offset,
+            ld.$y + ld.padding.top - 2,
+            width,
+            ld.$h - 2
+        );
+    }
+
+    const text = o.edit?.text ?? o.text;
+    ctx.fillStyle = ld.color;
+    ctx.font = ld.font;
+    ctx.fillText(text, ld.$x + ld.padding.left, ld.$y + ld.padding.top);
+
+    if (o === focusedInput && o.edit) {
+        const prefix = o.edit.text.slice(0, o.edit.cursor);
+        const offset = ctx.measureText(prefix).width;
+
+        const isOdd = lastT / 500 & 1;
+        if (isOdd) {
+            ctx.fillStyle = ld.color;
+            ctx.fillRect(
+                ld.$x + ld.padding.left + offset,
+                ld.$y + ld.padding.top - 2,
+                1,
+                ld.$h + 4
+            );
+        }
+    }
 
     drawBoundingBox(ld);
 }
@@ -505,7 +631,7 @@ function getOrCreateLayout(o: UI): LayoutData {
         ? styles[o.style]
         : o.style;
 
-    const ld = createLayoutData(style);
+    const ld = createLayoutData(id, style);
     layoutCache.set(id, { style: o.style, layout: ld });
 
     return ld;
@@ -519,7 +645,7 @@ const zeroTRBL: TRBL = {
 };
 
 type TRBLCacheCell = { key: string | number | Partial<TRBL>, value: TRBL }
-function createLayoutData(style: UIStyle | undefined): LayoutData {
+function createLayoutData(id: string, style: UIStyle | undefined): LayoutData {
     const res: LayoutData & {
         $$x: number | undefined,
         $$y: number | undefined,
@@ -529,14 +655,15 @@ function createLayoutData(style: UIStyle | undefined): LayoutData {
         $padding: TRBLCacheCell,
         $gap: { key: string | number, value: { row: number, column: number } }
     } = {
-        $$x: undefined,
-        $$y: undefined,
 
+        id,
         style,
 
+        $$x: undefined,
         get $x() { return this.$$x ?? style?.left ?? defaultStyle.left; },
         set $x(val: number) { this.$$x = val; },
 
+        $$y: undefined,
         get $y() { return this.$$y ?? style?.top ?? defaultStyle.top; },
         set $y(val: number) { this.$$y = val; },
 
@@ -656,16 +783,79 @@ function cacheGap(property: string, cache: { key: string | number, value: { row:
     return cache.value;
 }
 
-export function handleClickUI(ui: UI[]): boolean {
+export function handleMouseDown(ui: UI[]): boolean {
+    // losing focus should happend before the other events
+    if (focusedInput && !isMouseInside(focusedInput)) {
+        loseFocus();
+    }
+
+    return handleMouseDownWorker(ui);
+}
+
+function handleMouseDownWorker(ui: UI[]): boolean {
     for (const o of ui) {
         switch (o.kind) {
             case 'text':
             case 'image':
+            case 'button':
                 break;
 
+            case 'text-input': {
+                if (!isMouseInside(o)) {
+                    break;
+                }
+
+                if (focusedInput !== o) {
+                    loseFocus();
+
+                    focusedInput = o;
+                    focusedId = o.id ?? idMap.get(o);
+
+                    if (!focusedInput.edit) {
+                        focusedInput.edit = {
+                            text: focusedInput.text,
+                            cursor: focusedInput.text.length,
+                            selection: undefined
+                        };
+                    }
+                }
+
+                return true;
+            }
+
+            case 'container': {
+                if (!isMouseInside(o)) {
+                    break;
+                }
+
+                if (handleMouseDownWorker(o.children)) {
+                    return true;
+                }
+
+                break;
+            }
+
+            default: assertNever(o);
+        }
+    }
+
+    return false;
+}
+
+export function loseFocus() {
+    focusedId = undefined;
+    focusedInput = undefined;
+}
+
+export function handleClickUI(ui: UI[]): boolean {
+    for (const o of ui) {
+        switch (o.kind) {
+            case 'text':
+            case 'text-input':
+            case 'image':
             case 'button': {
-                if (isClickInside(o)) {
-                    o.onClick(o);
+                if (o.onClick && isClickInside(o)) {
+                    o.onClick(o as any); // TYH: ts can't figure out the relation, lol
                     return true;
                 }
 
@@ -678,6 +868,11 @@ export function handleClickUI(ui: UI[]): boolean {
                 }
 
                 if (handleClickUI(o.children)) {
+                    return true;
+                }
+
+                if (o.onClick) {
+                    o.onClick(o);
                     return true;
                 }
 
@@ -732,6 +927,7 @@ export function handleScrollUI(ui: UI[], deltaX: number, deltaY: number, isWheel
         switch (o.kind) {
             case 'text':
             case 'image':
+            case 'text-input':
             case 'button':
                 break;
 
@@ -765,6 +961,172 @@ export function handleScrollUI(ui: UI[], deltaX: number, deltaY: number, isWheel
 
     return false;
 }
+
+export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
+    if (!focusedInput || !focusedInput.edit) {
+        return false;
+    }
+
+    const sigil = keyToSigil(key);
+    const edit = focusedInput.edit;
+    switch (sigil) {
+        case 'META+LEFT':
+        case 'UP': {
+            edit.cursor = 0;
+            edit.selection = undefined;
+            return true;
+        }
+
+        case 'META+SHIFT+LEFT':
+        case 'SHIFT+UP': {
+            if (edit.selection) {
+                edit.selection.start = 0;
+            } else if (edit.cursor !== 0) {
+                edit.selection = {
+                    start: 0,
+                    end: edit.cursor
+
+                };
+            }
+
+            edit.cursor = 0;
+            return true;
+        }
+
+        case 'META+RIGHT':
+        case 'DOWN': {
+            edit.cursor = edit.text.length;
+            edit.selection = undefined;
+            return true;
+        }
+
+        case 'META+SHIFT+RIGHT':
+        case 'SHIFT+DOWN': {
+            if (edit.selection) {
+                edit.selection.end = edit.text.length;
+            } else if (edit.cursor !== edit.text.length) {
+                edit.selection = {
+                    start: edit.cursor,
+                    end: edit.text.length
+                };
+            }
+
+            edit.cursor = edit.text.length;
+            return true;
+        }
+
+        case 'LEFT': {
+            edit.cursor = edit.selection
+                ? edit.selection.start
+                : Math.max(edit.cursor - 1, 0);
+            edit.selection = undefined;
+            return false;
+        }
+
+        case 'SHIFT+LEFT': {
+            if (edit.selection) {
+                if (edit.cursor === edit.selection.start) {
+                    edit.cursor = Math.max(edit.cursor - 1, 0);
+                    edit.selection.start = edit.cursor;
+                }
+                if (edit.cursor === edit.selection.end) {
+                    edit.cursor = Math.max(edit.cursor - 1, 0);
+                    edit.selection.end = edit.cursor;
+                }
+                if (edit.selection.start === edit.selection.end) {
+                    edit.selection = undefined;
+                }
+            } else {
+                if (edit.cursor !== 0 && edit.text.length !== 0) {
+                    edit.cursor--;
+                    edit.selection = {
+                        start: edit.cursor,
+                        end: edit.cursor + 1
+                    };
+                }
+            }
+
+            return false;
+        }
+
+        case 'RIGHT': {
+            edit.cursor = edit.selection
+                ? edit.selection.end
+                : Math.min(edit.cursor + 1, edit.text.length);
+            edit.selection = undefined;
+
+            return false;
+        }
+
+        case 'SHIFT+RIGHT': {
+            if (edit.selection) {
+                if (edit.cursor === edit.selection.start) {
+                    edit.cursor = Math.min(edit.cursor + 1, edit.text.length);
+                    edit.selection.start = edit.cursor;
+                }
+                if (edit.cursor === edit.selection.end) {
+                    edit.cursor = Math.min(edit.cursor + 1, edit.text.length);
+                    edit.selection.end = edit.cursor;
+                }
+                if (edit.selection.start === edit.selection.end) {
+                    edit.selection = undefined;
+                }
+            } else {
+                if (edit.cursor !== edit.text.length) {
+                    edit.cursor++;
+                    edit.selection = {
+                        start: edit.cursor - 1,
+                        end: edit.cursor
+                    };
+                }
+            }
+
+            return false;
+        }
+
+        case 'BACKSPACE': {
+            if (edit.selection) {
+                edit.cursor = edit.selection.start;
+                edit.text = edit.text.slice(0, edit.selection.start) + edit.text.slice(edit.selection.end, edit.text.length);
+                edit.selection = undefined;
+            } else if (edit.cursor !== 0) {
+                edit.cursor = Math.max(edit.cursor - 1, 0);
+                edit.text = edit.text.slice(0, edit.cursor) + edit.text.slice(edit.cursor + 1, edit.text.length);
+            }
+
+            return false;
+        }
+
+        case 'ESC': {
+            loseFocus();
+            return false;
+        }
+
+        default: {
+            // accept only characters
+            if (key.key.length === 1) {
+                edit.text = edit.text.slice(0, edit.cursor) + key.key + edit.text.slice(edit.cursor, edit.text.length);
+                edit.cursor++;
+            }
+
+            return false;
+        }
+    }
+}
+
+/*
+hello world
+hello:world
+hello$world
+hello_world
+helloWorld
+hello-world
+hello+world
+hello~world
+hello'world
+hello|world
+hello?world
+*/
 
 export function debugBoundingBox(ui: UI[]) {
     const lds = ui.map(getOrCreateLayout);
