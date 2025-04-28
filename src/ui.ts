@@ -48,7 +48,7 @@ export type EditData = {
 export interface UITextInput extends UIBase<UITextInput> {
     kind: 'text-input',
     text: string,
-    edit?: EditData
+    edit?: EditData | undefined
 }
 
 export type ImageSlice = { kind: 'image', src: string, dx: number, dy: number, w: number, h: number }
@@ -843,6 +843,10 @@ function handleMouseDownWorker(ui: UI[]): boolean {
 }
 
 export function loseFocus() {
+    if (focusedInput?.edit) {
+        focusedInput.edit = undefined;
+    }
+
     focusedId = undefined;
     focusedInput = undefined;
 }
@@ -962,6 +966,13 @@ export function handleScrollUI(ui: UI[], deltaX: number, deltaY: number, isWheel
     return false;
 }
 
+// todo:
+// - support {option,ctrl}+{backspace,delete}
+// - support word hopping in non-latin
+// - history
+// - scrolling
+// - mobile support?
+// - Windows / Linux keybindings
 export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
     if (!focusedInput || !focusedInput.edit) {
         return false;
@@ -1028,8 +1039,7 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
                 if (edit.cursor === edit.selection.start) {
                     edit.cursor = Math.max(edit.cursor - 1, 0);
                     edit.selection.start = edit.cursor;
-                }
-                if (edit.cursor === edit.selection.end) {
+                } else if (edit.cursor === edit.selection.end) {
                     edit.cursor = Math.max(edit.cursor - 1, 0);
                     edit.selection.end = edit.cursor;
                 }
@@ -1049,6 +1059,43 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
             return false;
         }
 
+        case 'CTRL+LEFT':
+        case 'CTRL+SHIFT+LEFT':
+        case 'ALT+LEFT':
+        case 'ALT+SHIFT+LEFT': {
+            const rx = key.altKey
+                ? /\w+\s*$/
+                : /[a-zA-Z0-9]+_*\s*$/;
+            const prefix = edit.text.slice(0, edit.cursor);
+            const offset = rx.exec(prefix)?.[0].length
+                ?? /(.)\1*\s*$/.exec(prefix)?.[0].length
+                ?? 1;
+
+            const saved = edit.cursor;
+            edit.cursor = Math.max(edit.cursor - offset, 0);
+
+            if (key.shiftKey) {
+                if (edit.selection) {
+                    if (edit.selection.end === saved && edit.cursor >= edit.selection.start) {
+                        edit.selection.end = edit.cursor;
+                    } else {
+                        edit.selection.start = edit.cursor;
+                    }
+                    if (edit.selection.start === edit.selection.end) {
+                        edit.selection = undefined;
+                    }
+                } else {
+                    edit.selection = edit.cursor !== saved
+                        ? { start: edit.cursor, end: saved }
+                        : undefined;
+                }
+            } else {
+                edit.selection = undefined;
+            }
+
+            return false;
+        }
+
         case 'RIGHT': {
             edit.cursor = edit.selection
                 ? edit.selection.end
@@ -1063,8 +1110,7 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
                 if (edit.cursor === edit.selection.start) {
                     edit.cursor = Math.min(edit.cursor + 1, edit.text.length);
                     edit.selection.start = edit.cursor;
-                }
-                if (edit.cursor === edit.selection.end) {
+                } else if (edit.cursor === edit.selection.end) {
                     edit.cursor = Math.min(edit.cursor + 1, edit.text.length);
                     edit.selection.end = edit.cursor;
                 }
@@ -1084,14 +1130,69 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
             return false;
         }
 
+        case 'CTRL+RIGHT':
+        case 'CTRL+SHIFT+RIGHT':
+        case 'ALT+RIGHT':
+        case 'ALT+SHIFT+RIGHT': {
+            const rx = key.altKey
+                ? /^\s*\w+/
+                : /^\s*_*[a-zA-Z0-9]+/;
+            const suffix = edit.text.slice(edit.cursor);
+            const offset = rx.exec(suffix)?.[0].length
+                ?? /^\s*(.)\1*/.exec(suffix)?.[0].length
+                ?? 1;
+
+            const saved = edit.cursor;
+            edit.cursor = Math.min(edit.cursor + offset, edit.text.length);
+
+            if (key.shiftKey) {
+                if (edit.selection) {
+                    if (edit.selection.start === saved && edit.cursor <= edit.selection.end) {
+                        edit.selection.start = edit.cursor;
+                    } else {
+                        edit.selection.end = edit.cursor;
+                    }
+                    if (edit.selection.start === edit.selection.end) {
+                        edit.selection = undefined;
+                    }
+                } else {
+                    edit.selection = edit.cursor !== saved
+                        ? { start: saved, end: edit.cursor }
+                        : undefined;
+                }
+            } else {
+                edit.selection = undefined;
+            }
+
+            return false;
+        }
+
+        case 'META+DELETE': {
+            edit.text = edit.text.slice(0, edit.cursor);
+            edit.selection = undefined;
+
+            return false;
+        }
+
+        case 'META+BACKSPACE': {
+            edit.text = edit.text.slice(edit.cursor);
+            edit.cursor = 0;
+            edit.selection = undefined;
+
+            return false;
+        }
+
+        case 'DELETE':
         case 'BACKSPACE': {
             if (edit.selection) {
                 edit.cursor = edit.selection.start;
-                edit.text = edit.text.slice(0, edit.selection.start) + edit.text.slice(edit.selection.end, edit.text.length);
+                edit.text = edit.text.slice(0, edit.selection.start) + edit.text.slice(edit.selection.end);
                 edit.selection = undefined;
-            } else if (edit.cursor !== 0) {
-                edit.cursor = Math.max(edit.cursor - 1, 0);
-                edit.text = edit.text.slice(0, edit.cursor) + edit.text.slice(edit.cursor + 1, edit.text.length);
+            } else if (sigil === 'BACKSPACE' && edit.cursor !== 0) {
+                edit.cursor = edit.cursor - 1;
+                edit.text = edit.text.slice(0, edit.cursor) + edit.text.slice(edit.cursor + 1);
+            } else if (sigil === 'DELETE' && edit.cursor < edit.text.length) {
+                edit.text = edit.text.slice(0, edit.cursor) + edit.text.slice(edit.cursor + 1);
             }
 
             return false;
@@ -1102,31 +1203,46 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
             return false;
         }
 
+        case 'META+C': {
+            if (edit.selection) {
+                const selected = edit.text.slice(edit.selection.start, edit.selection.end);
+                navigator.clipboard.writeText(selected);
+            }
+            return false;
+        }
+
+        case 'META+V': {
+            // This is not entirely correct as it will happen sometime in the future due to the promise
+            // i.e. there is a race condition, but I think it's good enough as is
+            navigator.clipboard
+                .readText()
+                .then(text => {
+                    const start = edit.selection ? edit.selection.start : edit.cursor;
+                    const end = edit.selection ? edit.selection.end : edit.cursor;
+
+                    edit.text = edit.text.slice(0, start) + text + edit.text.slice(end);
+                    edit.cursor = edit.cursor + text.length;
+                    edit.selection = undefined;
+                });
+
+            return false;
+        }
+
         default: {
             // accept only characters
             if (key.key.length === 1) {
-                edit.text = edit.text.slice(0, edit.cursor) + key.key + edit.text.slice(edit.cursor, edit.text.length);
-                edit.cursor++;
+                const start = edit.selection ? edit.selection.start : edit.cursor;
+                const end = edit.selection ? edit.selection.end : edit.cursor;
+
+                edit.text = edit.text.slice(0, start) + key.key + edit.text.slice(end);
+                edit.cursor = start + 1;
+                edit.selection = undefined;
             }
 
             return false;
         }
     }
 }
-
-/*
-hello world
-hello:world
-hello$world
-hello_world
-helloWorld
-hello-world
-hello+world
-hello~world
-hello'world
-hello|world
-hello?world
-*/
 
 export function debugBoundingBox(ui: UI[]) {
     const lds = ui.map(getOrCreateLayout);
