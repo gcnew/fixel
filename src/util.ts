@@ -21,3 +21,14 @@ export function onlyKey(x: { [k: string]: unknown }) {
 export function assertNever(x: never) {
     throw new Error(`Not a never ${JSON.stringify(x)}`);
 }
+
+export type CacheCell<K, V> = { key: K | undefined, value: V | undefined }
+
+export function cacheCellGet<K, V>(cell: CacheCell<K, V>, key: K, f: () => V): V {
+    if (cell.key !== key || cell.value === undefined) {
+        cell.key = key;
+        cell.value = f();;
+    }
+
+    return cell.value;
+}

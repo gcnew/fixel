@@ -8,7 +8,7 @@ import {
     listen, unlisten, registerShortcuts, removeShortcuts,
 } from './engine'
 
-import { clamp, assertNever } from './util'
+import { type CacheCell, clamp, cacheCellGet, assertNever } from './util'
 import type { KbShortcut } from './keyboard'
 import {
     UI, Button, UIText, UIContainer, UIStyle,
@@ -17,7 +17,7 @@ import {
 
     handleScrollUI, handleClickUI, handleKeyDown,
 
-    focusedInput, isClickInside
+    focusedInput, isClickInside, isMouseInside,
 } from './ui'
 
 
@@ -749,7 +749,7 @@ const settingsContainer: UIContainer = {
     ],
 };
 
-const popupHeader: UI = {
+const popupHeader: UIContainer = {
     kind: 'container',
     children: [
         {
@@ -757,6 +757,10 @@ const popupHeader: UI = {
             inner: {
                 kind: 'text',
                 text: '_',
+            },
+            style: {
+                get color() { return isMouseInside(popupHeader.children[0]!) ? 'aliceblue' : 'gainsboro'; },
+                margin: { left: 255 }
             },
             onClick: () => { minimised = !minimised; }
         },
@@ -766,12 +770,16 @@ const popupHeader: UI = {
                 kind: 'text',
                 text: 'X',
             },
+            style: {
+                get color() { return isMouseInside(popupHeader.children[1]!) ? 'aliceblue' : 'gainsboro'; },
+                margin: { top: 2, left: 1 }
+            },
             onClick: () => {
                 (popUp.style as UIStyle).display = 'none';
             }
         }
     ],
-    style: { width: 300, height: 30, borderWidth: 2, borderColor: 'grey', layoutMode: 'row' }
+    style: { width: 300, borderWidth: 1, borderColor: 'silver', layoutMode: 'row', padding: 2 }
 };
 const popUp: UIContainer = {
     kind: 'container',
@@ -782,35 +790,54 @@ const popUp: UIContainer = {
         {
             kind: 'container',
             get children() {
-                if (!selectedStyle) {
-                    return Object.getOwnPropertyNames(compiledStyles).map<UI>(st => {
-                        return {
-                            kind: 'button',
-                            id: 'btn-' + st,
-                            inner: { kind: 'text', text: st },
-                            onClick: () => {
-                                selectedStyle = st;
-                                selectedStyleChildren = createSelectedStyleUI();
-                            }
-                        };
-                    });
+                if (selectedStyleUI) {
+                    return selectedStyleUI.value!;
                 }
 
-                return selectedStyleChildren!;
+                return cacheCellGet(compiledStylesUI, compiledStyles, () =>
+                    Object.getOwnPropertyNames(compiledStyles).map<UI>(st => {
+                        const self: UI = {
+                            kind: 'button',
+                            inner: { kind: 'text', text: st },
+                            style: {
+                                get color() { return isMouseInside(self) ? '#152b3e' : 'aliceblue'; },
+                                get font()  { return isMouseInside(self) ? 'bold 12px monospace' : '12px monospace'; }
+                            },
+                            onClick: () => {
+                                selectedStyleUI = { key: undefined, value: undefined };
+                                cacheCellGet(selectedStyleUI, st, () => createSelectedStyleUI(st));
+                            }
+                        };
+                        return self;
+                    })
+                );
             },
             style: { layoutMode: 'column', get display() { return minimised ? 'none' : 'visible' } }
         },
     ],
-    style: { top: 100, left: 100, width: 300, borderWidth: 2, borderColor: 'grey', backgroundColor: 'black', scroll: 'y', layoutMode: 'column', },
+    style: { top: 100, left: 100, width: 300, borderWidth: 2, borderColor: 'slategrey', backgroundColor: 'slategrey', scroll: 'y', layoutMode: 'column', },
 };
 let minimised = false;
-let selectedStyle: string | undefined;
-let selectedStyleChildren: UI[] | undefined;
+let selectedStyleUI: CacheCell<string, UI[]> | undefined;
+let compiledStylesUI: CacheCell<object, UI[]> = { key: undefined, value: undefined };
+// lightcyan / powderblue / gainsboro
+const backButton: UI = {
+    kind: 'button',
+    inner: { kind: 'text', text: 'Back' },
+    style: {
+        borderWidth: 1,
+        margin: { top: 5, left: 5, bottom: 5 },
 
-const width100: UIStyle = { width: 100 };
-const backButton: UIStyle = { borderWidth: 1, borderColor: 'darkgray' };
-function createSelectedStyleUI(): UI[] {
-    const style = compiledStyles[selectedStyle!]!;
+        get borderColor() { return isMouseInside(backButton) ? '#152b3e' : 'aliceblue'; },
+        get color()       { return isMouseInside(backButton) ? '#152b3e' : 'aliceblue'; },
+        get font()        { return isMouseInside(backButton) ? 'bold 12px monospace' : '12px monospace'; }
+    },
+    onClick: () => {
+        selectedStyleUI = undefined;
+    },
+};
+function createSelectedStyleUI(selectedStyle: string): UI[] {
+    const style = compiledStyles[selectedStyle]!;
     return [
         ... Object.getOwnPropertyNames(style).map<UI>(name => {
             const self: UI = {
@@ -818,34 +845,26 @@ function createSelectedStyleUI(): UI[] {
                 text: String(style[name as keyof UIStyle]),
                 style: {
                     get backgroundColor() { return self === focusedInput ? 'floralwhite' : undefined },
-                    get color()           { return self === focusedInput ? 'black' : undefined as any as string },
+                    get color()           { return self === focusedInput ? 'black' : 'aliceblue' },
                     get padding()         { return self === focusedInput ? '3 2 2 2' : undefined as any },
                 }
             };
 
             return {
                 kind: 'container',
-                style: { layoutMode: 'row' },
+                style: { layoutMode: 'row', margin: '5 0 0 5' },
                 children: [
                     {
                         kind: 'text',
                         text: name + ':',
-                        style: width100
+                        style: { width: 100, color: 'aliceblue' }
                     },
                     self
                 ]
             } satisfies UI;
         }),
 
-        {
-            kind: 'button',
-            inner: { kind: 'text', text: 'Back' },
-            style: backButton,
-            onClick: () => {
-                selectedStyle = undefined;
-                selectedStyleChildren = undefined;
-            },
-        }
+        backButton
     ];
 }
 

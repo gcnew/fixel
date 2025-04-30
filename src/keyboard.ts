@@ -82,6 +82,8 @@ export const KeyMap = {
     Enter:        'ENTER',
     CapsLock:     'CAPSLOCK',
     Space:        'SPACE',
+    Home:         'HOME',
+    End:          'END',
 
     ArrowLeft:    'LEFT',
     ArrowRight:   'RIGHT',

@@ -24,7 +24,6 @@ export interface UIContainer extends UIBase<UIContainer> {
 export interface UIText extends UIBase<UIText> {
     kind: 'text',
     text: string,
-    onChange?: (self: UITextInput, newText: string) => void,
 }
 
 export interface UIImage extends UIBase<UIImage> {
@@ -48,7 +47,8 @@ export type EditData = {
 export interface UITextInput extends UIBase<UITextInput> {
     kind: 'text-input',
     text: string,
-    edit?: EditData | undefined
+    edit?: EditData | undefined,
+    onChange?: (self: UITextInput, newText: string) => void,
 }
 
 export type ImageSlice = { kind: 'image', src: string, dx: number, dy: number, w: number, h: number }
@@ -484,7 +484,7 @@ function drawTextInput(o: UITextInput) {
                 ld.$x + ld.padding.left + offset,
                 ld.$y + ld.padding.top - 2,
                 1,
-                ld.$h + 4
+                ld.$h - 2
             );
         }
     }
@@ -515,6 +515,11 @@ function drawImage(o: UIImage) {
 
 function drawButton(o: UIButton) {
     const ld = getOrCreateLayout(o);
+
+    if (ld.backgroundColor) {
+        ctx.fillStyle = ld.backgroundColor;
+        ctx.fillRect(ld.$x, ld.$y, ld.$w, ld.$h);
+    }
 
     if (o.inner.kind === 'text') {
         ctx.fillStyle = ld.color;
@@ -982,6 +987,7 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
     const edit = focusedInput.edit;
     switch (sigil) {
         case 'META+LEFT':
+        case 'HOME':
         case 'UP': {
             edit.cursor = 0;
             edit.selection = undefined;
@@ -989,6 +995,7 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
         }
 
         case 'META+SHIFT+LEFT':
+        case 'SHIFT+HOME':
         case 'SHIFT+UP': {
             if (edit.selection) {
                 edit.selection.start = 0;
@@ -1005,6 +1012,7 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
         }
 
         case 'META+RIGHT':
+        case 'END':
         case 'DOWN': {
             edit.cursor = edit.text.length;
             edit.selection = undefined;
@@ -1012,6 +1020,7 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
         }
 
         case 'META+SHIFT+RIGHT':
+        case 'SHIFT+END':
         case 'SHIFT+DOWN': {
             if (edit.selection) {
                 edit.selection.end = edit.text.length;
@@ -1203,6 +1212,7 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
             return false;
         }
 
+        case 'CTRL+C':
         case 'META+C': {
             if (edit.selection) {
                 const selected = edit.text.slice(edit.selection.start, edit.selection.end);
@@ -1211,6 +1221,7 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
             return false;
         }
 
+        case 'CTRL+V':
         case 'META+V': {
             // This is not entirely correct as it will happen sometime in the future due to the promise
             // i.e. there is a race condition, but I think it's good enough as is
