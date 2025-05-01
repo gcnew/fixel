@@ -5,7 +5,7 @@ import {
 } from './engine'
 
 import { compileStyle } from './mini-css'
-import { type KbKey, keyToSigil } from './keyboard'
+import { type KbKey, keyToSigil, KeyMap } from './keyboard'
 import { uuid, clamp, assertNever } from './util'
 
 export type UI = UIText
@@ -38,6 +38,7 @@ export interface UIImage extends UIBase<UIImage> {
 export type EditData = {
     text: string,
     cursor: number,
+    lastKeyT: number,
     selection: undefined | {
         start: number,
         end: number
@@ -477,8 +478,8 @@ function drawTextInput(o: UITextInput) {
         const prefix = o.edit.text.slice(0, o.edit.cursor);
         const offset = ctx.measureText(prefix).width;
 
-        const isOdd = lastT / 500 & 1;
-        if (isOdd) {
+        const isOdd = (lastT - o.edit.lastKeyT) / 500 & 1;
+        if (isOdd === 0) {
             ctx.fillStyle = ld.color;
             ctx.fillRect(
                 ld.$x + ld.padding.left + offset,
@@ -820,6 +821,7 @@ function handleMouseDownWorker(ui: UI[]): boolean {
                         focusedInput.edit = {
                             text: focusedInput.text,
                             cursor: focusedInput.text.length,
+                            lastKeyT: lastT,
                             selection: undefined
                         };
                     }
@@ -972,12 +974,9 @@ export function handleScrollUI(ui: UI[], deltaX: number, deltaY: number, isWheel
 }
 
 // todo:
-// - support {option,ctrl}+{backspace,delete}
-// - support word hopping in non-latin
 // - history
 // - scrolling
 // - mobile support?
-// - Windows / Linux keybindings
 export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
     if (!focusedInput || !focusedInput.edit) {
         return false;
@@ -985,6 +984,9 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
 
     const sigil = keyToSigil(key);
     const edit = focusedInput.edit;
+
+    edit.lastKeyT = lastT;
+
     switch (sigil) {
         case 'META+LEFT':
         case 'HOME':
@@ -1070,20 +1072,31 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
 
         case 'CTRL+LEFT':
         case 'CTRL+SHIFT+LEFT':
+        case 'CTRL+BACKSPACE':
+        case 'CTRL+SHIFT+BACKSPACE':
         case 'ALT+LEFT':
-        case 'ALT+SHIFT+LEFT': {
+        case 'ALT+SHIFT+LEFT':
+        case 'ALT+BACKSPACE':
+        case 'ALT+SHIFT+BACKSPACE': {
             const rx = key.altKey
-                ? /\w+\s*$/
-                : /[a-zA-Z0-9]+_*\s*$/;
+                ? /[\p{L}_\p{N}]+\s*$/u
+                : /(?:\p{Lu}?[\p{Ll}\p{N}]+|(?:\p{Lu}(?!\p{Ll}))+)_*\s*$/u;
             const prefix = edit.text.slice(0, edit.cursor);
             const offset = rx.exec(prefix)?.[0].length
-                ?? /(.)\1*\s*$/.exec(prefix)?.[0].length
+                ?? /(?:\p{S}+|\p{P}+)\s*$/u.exec(prefix)?.[0].length
                 ?? 1;
 
             const saved = edit.cursor;
             edit.cursor = Math.max(edit.cursor - offset, 0);
 
-            if (key.shiftKey) {
+            if (KeyMap[key.code as keyof typeof KeyMap] === 'BACKSPACE') {
+                const start = edit.selection ? edit.selection.start : edit.cursor;
+                const end = edit.selection ? edit.selection.end : saved;
+
+                edit.text = edit.text.slice(0, start) + edit.text.slice(end);
+                edit.cursor = start;
+                edit.selection = undefined;
+            } else if (key.shiftKey) {
                 if (edit.selection) {
                     if (edit.selection.end === saved && edit.cursor >= edit.selection.start) {
                         edit.selection.end = edit.cursor;
@@ -1141,20 +1154,31 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
 
         case 'CTRL+RIGHT':
         case 'CTRL+SHIFT+RIGHT':
+        case 'CTRL+DELETE':
+        case 'CTRL+SHIFT+DELETE':
         case 'ALT+RIGHT':
-        case 'ALT+SHIFT+RIGHT': {
+        case 'ALT+SHIFT+RIGHT':
+        case 'ALT+DELETE':
+        case 'ALT+SHIFT+DELETE': {
             const rx = key.altKey
-                ? /^\s*\w+/
-                : /^\s*_*[a-zA-Z0-9]+/;
+                ? /^\s*[\p{L}_\p{N}]+/u
+                : /^\s*_*(?:\p{Lu}?[\p{Ll}\p{N}]+|(?:\p{Lu}(?!\p{Ll}))+)/u;
             const suffix = edit.text.slice(edit.cursor);
             const offset = rx.exec(suffix)?.[0].length
-                ?? /^\s*(.)\1*/.exec(suffix)?.[0].length
+                ?? /^\s*(?:\p{S}+|\p{P}+)/u.exec(suffix)?.[0].length
                 ?? 1;
 
             const saved = edit.cursor;
             edit.cursor = Math.min(edit.cursor + offset, edit.text.length);
 
-            if (key.shiftKey) {
+            if (KeyMap[key.code as keyof typeof KeyMap] === 'DELETE') {
+                const start = edit.selection ? edit.selection.start : saved;
+                const end = edit.selection ? edit.selection.end : edit.cursor;
+
+                edit.text = edit.text.slice(0, start) + edit.text.slice(end);
+                edit.cursor = start;
+                edit.selection = undefined;
+            } else if (key.shiftKey) {
                 if (edit.selection) {
                     if (edit.selection.start === saved && edit.cursor <= edit.selection.end) {
                         edit.selection.start = edit.cursor;
