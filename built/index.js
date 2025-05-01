@@ -24,7 +24,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
 define("util", ["require", "exports"], function (require, exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.assertNever = exports.onlyKey = exports.uuid = exports.clamp = exports.isTruthy = void 0;
+    exports.cacheCellGet = exports.assertNever = exports.onlyKey = exports.uuid = exports.clamp = exports.isTruthy = void 0;
     function isTruthy(x) {
         return !!x;
     }
@@ -46,6 +46,15 @@ define("util", ["require", "exports"], function (require, exports) {
         throw new Error(`Not a never ${JSON.stringify(x)}`);
     }
     exports.assertNever = assertNever;
+    function cacheCellGet(cell, key, f) {
+        if (cell.key !== key || cell.value === undefined) {
+            cell.key = key;
+            cell.value = f();
+            ;
+        }
+        return cell.value;
+    }
+    exports.cacheCellGet = cacheCellGet;
 });
 define("keyboard", ["require", "exports", "util"], function (require, exports, util_1) {
     "use strict";
@@ -115,6 +124,8 @@ define("keyboard", ["require", "exports", "util"], function (require, exports, u
         Enter: 'ENTER',
         CapsLock: 'CAPSLOCK',
         Space: 'SPACE',
+        Home: 'HOME',
+        End: 'END',
         ArrowLeft: 'LEFT',
         ArrowRight: 'RIGHT',
         ArrowUp: 'UP',
@@ -812,10 +823,10 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
         if (o === exports.focusedInput && o.edit) {
             const prefix = o.edit.text.slice(0, o.edit.cursor);
             const offset = engine_1.ctx.measureText(prefix).width;
-            const isOdd = engine_1.lastT / 500 & 1;
-            if (isOdd) {
+            const isOdd = (engine_1.lastT - o.edit.lastKeyT) / 500 & 1;
+            if (isOdd === 0) {
                 engine_1.ctx.fillStyle = ld.color;
-                engine_1.ctx.fillRect(ld.$x + ld.padding.left + offset, ld.$y + ld.padding.top - 2, 1, ld.$h + 4);
+                engine_1.ctx.fillRect(ld.$x + ld.padding.left + offset, ld.$y + ld.padding.top - 2, 1, ld.$h - 2);
             }
         }
         drawBoundingBox(ld);
@@ -831,6 +842,10 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
     }
     function drawButton(o) {
         const ld = getOrCreateLayout(o);
+        if (ld.backgroundColor) {
+            engine_1.ctx.fillStyle = ld.backgroundColor;
+            engine_1.ctx.fillRect(ld.$x, ld.$y, ld.$w, ld.$h);
+        }
         if (o.inner.kind === 'text') {
             engine_1.ctx.fillStyle = ld.color;
             engine_1.ctx.font = ld.font;
@@ -1062,6 +1077,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
                             exports.focusedInput.edit = {
                                 text: exports.focusedInput.text,
                                 cursor: exports.focusedInput.text.length,
+                                lastKeyT: engine_1.lastT,
                                 selection: undefined
                             };
                         }
@@ -1188,26 +1204,26 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
     }
     exports.handleScrollUI = handleScrollUI;
     // todo:
-    // - support {option,ctrl}+{backspace,delete}
-    // - support word hopping in non-latin
     // - history
     // - scrolling
     // - mobile support?
-    // - Windows / Linux keybindings
     function handleKeyDown(_ui, key) {
         if (!exports.focusedInput || !exports.focusedInput.edit) {
             return false;
         }
         const sigil = (0, keyboard_2.keyToSigil)(key);
         const edit = exports.focusedInput.edit;
+        edit.lastKeyT = engine_1.lastT;
         switch (sigil) {
             case 'META+LEFT':
+            case 'HOME':
             case 'UP': {
                 edit.cursor = 0;
                 edit.selection = undefined;
                 return true;
             }
             case 'META+SHIFT+LEFT':
+            case 'SHIFT+HOME':
             case 'SHIFT+UP': {
                 if (edit.selection) {
                     edit.selection.start = 0;
@@ -1222,12 +1238,14 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
                 return true;
             }
             case 'META+RIGHT':
+            case 'END':
             case 'DOWN': {
                 edit.cursor = edit.text.length;
                 edit.selection = undefined;
                 return true;
             }
             case 'META+SHIFT+RIGHT':
+            case 'SHIFT+END':
             case 'SHIFT+DOWN': {
                 if (edit.selection) {
                     edit.selection.end = edit.text.length;
@@ -1275,18 +1293,29 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
             }
             case 'CTRL+LEFT':
             case 'CTRL+SHIFT+LEFT':
+            case 'CTRL+BACKSPACE':
+            case 'CTRL+SHIFT+BACKSPACE':
             case 'ALT+LEFT':
-            case 'ALT+SHIFT+LEFT': {
+            case 'ALT+SHIFT+LEFT':
+            case 'ALT+BACKSPACE':
+            case 'ALT+SHIFT+BACKSPACE': {
                 const rx = key.altKey
-                    ? /\w+\s*$/
-                    : /[a-zA-Z0-9]+_*\s*$/;
+                    ? /[\p{L}_\p{N}]+\s*$/u
+                    : /(?:\p{Lu}?[\p{Ll}\p{N}]+|(?:\p{Lu}(?!\p{Ll}))+)_*\s*$/u;
                 const prefix = edit.text.slice(0, edit.cursor);
                 const offset = rx.exec(prefix)?.[0].length
-                    ?? /(.)\1*\s*$/.exec(prefix)?.[0].length
+                    ?? /(?:\p{S}+|\p{P}+)\s*$/u.exec(prefix)?.[0].length
                     ?? 1;
                 const saved = edit.cursor;
                 edit.cursor = Math.max(edit.cursor - offset, 0);
-                if (key.shiftKey) {
+                if (keyboard_2.KeyMap[key.code] === 'BACKSPACE') {
+                    const start = edit.selection ? edit.selection.start : edit.cursor;
+                    const end = edit.selection ? edit.selection.end : saved;
+                    edit.text = edit.text.slice(0, start) + edit.text.slice(end);
+                    edit.cursor = start;
+                    edit.selection = undefined;
+                }
+                else if (key.shiftKey) {
                     if (edit.selection) {
                         if (edit.selection.end === saved && edit.cursor >= edit.selection.start) {
                             edit.selection.end = edit.cursor;
@@ -1343,18 +1372,29 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
             }
             case 'CTRL+RIGHT':
             case 'CTRL+SHIFT+RIGHT':
+            case 'CTRL+DELETE':
+            case 'CTRL+SHIFT+DELETE':
             case 'ALT+RIGHT':
-            case 'ALT+SHIFT+RIGHT': {
+            case 'ALT+SHIFT+RIGHT':
+            case 'ALT+DELETE':
+            case 'ALT+SHIFT+DELETE': {
                 const rx = key.altKey
-                    ? /^\s*\w+/
-                    : /^\s*_*[a-zA-Z0-9]+/;
+                    ? /^\s*[\p{L}_\p{N}]+/u
+                    : /^\s*_*(?:\p{Lu}?[\p{Ll}\p{N}]+|(?:\p{Lu}(?!\p{Ll}))+)/u;
                 const suffix = edit.text.slice(edit.cursor);
                 const offset = rx.exec(suffix)?.[0].length
-                    ?? /^\s*(.)\1*/.exec(suffix)?.[0].length
+                    ?? /^\s*(?:\p{S}+|\p{P}+)/u.exec(suffix)?.[0].length
                     ?? 1;
                 const saved = edit.cursor;
                 edit.cursor = Math.min(edit.cursor + offset, edit.text.length);
-                if (key.shiftKey) {
+                if (keyboard_2.KeyMap[key.code] === 'DELETE') {
+                    const start = edit.selection ? edit.selection.start : saved;
+                    const end = edit.selection ? edit.selection.end : edit.cursor;
+                    edit.text = edit.text.slice(0, start) + edit.text.slice(end);
+                    edit.cursor = start;
+                    edit.selection = undefined;
+                }
+                else if (key.shiftKey) {
                     if (edit.selection) {
                         if (edit.selection.start === saved && edit.cursor <= edit.selection.end) {
                             edit.selection.start = edit.cursor;
@@ -1408,6 +1448,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
                 loseFocus();
                 return false;
             }
+            case 'CTRL+C':
             case 'META+C': {
                 if (edit.selection) {
                     const selected = edit.text.slice(edit.selection.start, edit.selection.end);
@@ -1415,6 +1456,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
                 }
                 return false;
             }
+            case 'CTRL+V':
             case 'META+V': {
                 // This is not entirely correct as it will happen sometime in the future due to the promise
                 // i.e. there is a race condition, but I think it's good enough as is
@@ -2091,6 +2133,10 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                     kind: 'text',
                     text: '_',
                 },
+                style: {
+                    get color() { return (0, ui_1.isMouseInside)(popupHeader.children[0]) ? 'aliceblue' : 'gainsboro'; },
+                    margin: { left: 255 }
+                },
                 onClick: () => { minimised = !minimised; }
             },
             {
@@ -2099,12 +2145,16 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                     kind: 'text',
                     text: 'X',
                 },
+                style: {
+                    get color() { return (0, ui_1.isMouseInside)(popupHeader.children[1]) ? 'aliceblue' : 'gainsboro'; },
+                    margin: { top: 2, left: 1 }
+                },
                 onClick: () => {
                     popUp.style.display = 'none';
                 }
             }
         ],
-        style: { width: 300, height: 30, borderWidth: 2, borderColor: 'grey', layoutMode: 'row' }
+        style: { width: 300, borderWidth: 1, borderColor: 'silver', layoutMode: 'row', padding: 2 }
     };
     const popUp = {
         kind: 'container',
@@ -2114,32 +2164,49 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
             {
                 kind: 'container',
                 get children() {
-                    if (!selectedStyle) {
-                        return Object.getOwnPropertyNames(ui_1.styles).map(st => {
-                            return {
-                                kind: 'button',
-                                id: 'btn-' + st,
-                                inner: { kind: 'text', text: st },
-                                onClick: () => {
-                                    selectedStyle = st;
-                                    selectedStyleChildren = createSelectedStyleUI();
-                                }
-                            };
-                        });
+                    if (selectedStyleUI) {
+                        return selectedStyleUI.value;
                     }
-                    return selectedStyleChildren;
+                    return (0, util_4.cacheCellGet)(compiledStylesUI, ui_1.styles, () => Object.getOwnPropertyNames(ui_1.styles).map(st => {
+                        const self = {
+                            kind: 'button',
+                            inner: { kind: 'text', text: st },
+                            style: {
+                                get color() { return (0, ui_1.isMouseInside)(self) ? '#152b3e' : 'aliceblue'; },
+                                get font() { return (0, ui_1.isMouseInside)(self) ? 'bold 12px monospace' : '12px monospace'; }
+                            },
+                            onClick: () => {
+                                selectedStyleUI = { key: undefined, value: undefined };
+                                (0, util_4.cacheCellGet)(selectedStyleUI, st, () => createSelectedStyleUI(st));
+                            }
+                        };
+                        return self;
+                    }));
                 },
                 style: { layoutMode: 'column', get display() { return minimised ? 'none' : 'visible'; } }
             },
         ],
-        style: { top: 100, left: 100, width: 300, borderWidth: 2, borderColor: 'grey', backgroundColor: 'black', scroll: 'y', layoutMode: 'column', },
+        style: { top: 100, left: 100, width: 300, borderWidth: 2, borderColor: 'slategrey', backgroundColor: 'slategrey', scroll: 'y', layoutMode: 'column', },
     };
     let minimised = false;
-    let selectedStyle;
-    let selectedStyleChildren;
-    const width100 = { width: 100 };
-    const backButton = { borderWidth: 1, borderColor: 'darkgray' };
-    function createSelectedStyleUI() {
+    let selectedStyleUI;
+    let compiledStylesUI = { key: undefined, value: undefined };
+    // lightcyan / powderblue / gainsboro
+    const backButton = {
+        kind: 'button',
+        inner: { kind: 'text', text: 'Back' },
+        style: {
+            borderWidth: 1,
+            margin: { top: 5, left: 5, bottom: 5 },
+            get borderColor() { return (0, ui_1.isMouseInside)(backButton) ? '#152b3e' : 'aliceblue'; },
+            get color() { return (0, ui_1.isMouseInside)(backButton) ? '#152b3e' : 'aliceblue'; },
+            get font() { return (0, ui_1.isMouseInside)(backButton) ? 'bold 12px monospace' : '12px monospace'; }
+        },
+        onClick: () => {
+            selectedStyleUI = undefined;
+        },
+    };
+    function createSelectedStyleUI(selectedStyle) {
         const style = ui_1.styles[selectedStyle];
         return [
             ...Object.getOwnPropertyNames(style).map(name => {
@@ -2148,32 +2215,24 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                     text: String(style[name]),
                     style: {
                         get backgroundColor() { return self === ui_1.focusedInput ? 'floralwhite' : undefined; },
-                        get color() { return self === ui_1.focusedInput ? 'black' : undefined; },
+                        get color() { return self === ui_1.focusedInput ? 'black' : 'aliceblue'; },
                         get padding() { return self === ui_1.focusedInput ? '3 2 2 2' : undefined; },
                     }
                 };
                 return {
                     kind: 'container',
-                    style: { layoutMode: 'row' },
+                    style: { layoutMode: 'row', margin: '5 0 0 5' },
                     children: [
                         {
                             kind: 'text',
                             text: name + ':',
-                            style: width100
+                            style: { width: 100, color: 'aliceblue' }
                         },
                         self
                     ]
                 };
             }),
-            {
-                kind: 'button',
-                inner: { kind: 'text', text: 'Back' },
-                style: backButton,
-                onClick: () => {
-                    selectedStyle = undefined;
-                    selectedStyleChildren = undefined;
-                },
-            }
+            backButton
         ];
     }
     function createAtlasList() {
