@@ -1,7 +1,7 @@
 
 import {
     ctx,
-    lastT, mouseX, mouseY, clickX, clickY,
+    lastT, mouseX, mouseY, clickX, clickY, pressedKeys,
 } from './engine'
 
 import { compileStyle } from './mini-css'
@@ -243,6 +243,8 @@ function beforeDraw(ui: UI[]) {
         handleMouseDown(ui);
     }
 
+    handleMouseMove(ui);
+
     _clickX = clickX;
 }
 
@@ -450,7 +452,16 @@ function drawTextInput(o: UITextInput) {
 
     if (ld.backgroundColor) {
         ctx.fillStyle = ld.backgroundColor;
-        ctx.fillRect(ld.$x, ld.$y, ld.$w + 20, ld.$h);
+        ctx.fillRect(ld.$x, ld.$y, ld.$w + 3, ld.$h);
+    }
+
+    // TODO: ...
+    const clip = !!ld.scroll || ld.textMetrics!.width > ld.$w;
+    if (clip) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(ld.$x, ld.$y, ld.$w, ld.$h);
+        ctx.clip();
     }
 
     if (o === focusedInput && o.edit?.selection) {
@@ -460,7 +471,7 @@ function drawTextInput(o: UITextInput) {
         const selected = o.edit.text.slice(o.edit.selection.start, o.edit.selection.end);
         const width = ctx.measureText(selected).width;
 
-        ctx.fillStyle = 'rgb(180,215,255)';
+        ctx.fillStyle = '#b4d7ff';
         ctx.fillRect(
             ld.$x + ld.padding.left + offset,
             ld.$y + ld.padding.top - 2,
@@ -488,6 +499,10 @@ function drawTextInput(o: UITextInput) {
                 ld.$h - 2
             );
         }
+    }
+
+    if (clip) {
+        ctx.restore();
     }
 
     drawBoundingBox(ld);
@@ -820,11 +835,35 @@ function handleMouseDownWorker(ui: UI[]): boolean {
                     if (!focusedInput.edit) {
                         focusedInput.edit = {
                             text: focusedInput.text,
-                            cursor: focusedInput.text.length,
+                            cursor: 0,
                             lastKeyT: lastT,
                             selection: undefined
                         };
                     }
+                }
+
+                const edit = focusedInput.edit!;
+                const saved = edit.cursor;
+
+                edit.lastKeyT = lastT;
+                edit.cursor = mousePositionToCursor(focusedInput, mouseX);
+
+                if (pressedKeys.SHIFT) {
+                    if (!edit.selection) {
+                        edit.selection = {
+                            start: Math.min(saved, edit.cursor),
+                            end: Math.max(saved, edit.cursor)
+                        };
+                    } else if (edit.cursor < edit.selection.end && (edit.selection.start === saved || edit.cursor <= edit.selection.start)) {
+                        edit.selection.start = edit.cursor;
+                    } else {
+                        edit.selection.end = edit.cursor;
+                    }
+                    if (edit.selection.start === edit.selection.end) {
+                        edit.selection = undefined;
+                    }
+                } else {
+                    edit.selection = undefined;
                 }
 
                 return true;
@@ -847,6 +886,70 @@ function handleMouseDownWorker(ui: UI[]): boolean {
     }
 
     return false;
+}
+
+// TODO: fix me, currently quadratic
+function mousePositionToCursor(o: UITextInput, mouseX: number) {
+    const ld = getOrCreateLayout(o);
+
+    const text = o.edit!.text;
+    const x = mouseX - ld.$x - ld.padding.left;
+
+    let lastMeasure = 0;
+    for (let i = 1; i <= text.length; ++i) {
+        const prefix = text.slice(0, i);
+        const width = ctx.measureText(prefix).width;
+
+        if (width > x) {
+            return x - lastMeasure <= width - x
+                ? i - 1
+                : i;
+        }
+
+        lastMeasure = width;
+    }
+
+    return x > lastMeasure
+        ? text.length
+        : 0;
+}
+
+function handleMouseMove(_ui: UI[]) {
+    if (clickX === undefined || !focusedInput) {
+        return;
+    }
+
+    const edit = focusedInput.edit!;
+    const saved = edit.cursor;
+
+    edit.cursor = mousePositionToCursor(focusedInput, mouseX);
+    if (edit.cursor === saved) {
+        return;
+    }
+
+    edit.lastKeyT = lastT;
+    if (edit.selection) {
+        if (saved === edit.selection.start) {
+            edit.selection.start = edit.cursor;
+        } else if (saved === edit.selection.end) {
+            edit.selection.end = edit.cursor;
+        }
+        if (edit.selection.end < edit.selection.start) {
+            const tmp = edit.selection.start;
+            edit.selection.start = edit.selection.end;
+            edit.selection.end = tmp;
+        }
+        if (edit.selection.start === edit.selection.end) {
+            edit.selection = undefined;
+        }
+    } else if (saved !== edit.cursor) {
+        edit.selection = {
+            start: Math.min(saved, edit.cursor),
+            end: Math.max(saved, edit.cursor)
+        }
+    } else {
+        edit.selection = undefined;
+    }
 }
 
 export function loseFocus() {
@@ -976,6 +1079,9 @@ export function handleScrollUI(ui: UI[], deltaX: number, deltaY: number, isWheel
 // todo:
 // - history
 // - scrolling
+// - fix mouse to position, currently quadratic
+// - cleanup selection management as it's all over the place
+// - add tests?
 // - mobile support?
 export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
     if (!focusedInput || !focusedInput.edit) {
@@ -1259,6 +1365,32 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
                     edit.cursor = edit.cursor + text.length;
                     edit.selection = undefined;
                 });
+
+            return false;
+        }
+
+        case 'CTRL+X':
+        case 'META+X': {
+            if (edit.selection) {
+                const selected = edit.text.slice(edit.selection.start, edit.selection.end);
+                navigator.clipboard.writeText(selected)
+                    .then(() => {
+                        edit.cursor = edit.selection!.start;
+                        edit.text = edit.text.slice(0, edit.selection!.start) + edit.text.slice(edit.selection!.end);
+                        edit.selection = undefined;
+                    });
+            }
+
+            return false;
+        }
+
+        case 'CTRL+A':
+        case 'META+A': {
+            edit.selection = {
+                start: 0,
+                end: edit.text.length
+            };
+            edit.cursor = edit.text.length;
 
             return false;
         }

@@ -847,6 +847,7 @@ function createSelectedStyleUI(selectedStyle: string): UI[] {
                     get backgroundColor() { return self === focusedInput ? 'floralwhite' : undefined },
                     get color()           { return self === focusedInput ? 'black' : 'aliceblue' },
                     get padding()         { return self === focusedInput ? '3 2 2 2' : undefined as any },
+                    width: 150
                 }
             };
 
