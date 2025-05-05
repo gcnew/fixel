@@ -625,6 +625,7 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
         if (engine_1.clickX !== undefined && _clickX === undefined) {
             handleMouseDown(ui);
         }
+        handleMouseMove(ui);
         _clickX = engine_1.clickX;
     }
     function calcBoxes(ui) {
@@ -806,14 +807,22 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
         const ld = getOrCreateLayout(o);
         if (ld.backgroundColor) {
             engine_1.ctx.fillStyle = ld.backgroundColor;
-            engine_1.ctx.fillRect(ld.$x, ld.$y, ld.$w + 20, ld.$h);
+            engine_1.ctx.fillRect(ld.$x, ld.$y, ld.$w + 3, ld.$h);
+        }
+        // TODO: ...
+        const clip = !!ld.scroll || ld.textMetrics.width > ld.$w;
+        if (clip) {
+            engine_1.ctx.save();
+            engine_1.ctx.beginPath();
+            engine_1.ctx.rect(ld.$x, ld.$y, ld.$w, ld.$h);
+            engine_1.ctx.clip();
         }
         if (o === exports.focusedInput && o.edit?.selection) {
             const prefix = o.edit.text.slice(0, o.edit.selection.start);
             const offset = engine_1.ctx.measureText(prefix).width;
             const selected = o.edit.text.slice(o.edit.selection.start, o.edit.selection.end);
             const width = engine_1.ctx.measureText(selected).width;
-            engine_1.ctx.fillStyle = 'rgb(180,215,255)';
+            engine_1.ctx.fillStyle = '#b4d7ff';
             engine_1.ctx.fillRect(ld.$x + ld.padding.left + offset, ld.$y + ld.padding.top - 2, width, ld.$h - 2);
         }
         const text = o.edit?.text ?? o.text;
@@ -828,6 +837,9 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
                 engine_1.ctx.fillStyle = ld.color;
                 engine_1.ctx.fillRect(ld.$x + ld.padding.left + offset, ld.$y + ld.padding.top - 2, 1, ld.$h - 2);
             }
+        }
+        if (clip) {
+            engine_1.ctx.restore();
         }
         drawBoundingBox(ld);
     }
@@ -1076,11 +1088,35 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
                         if (!exports.focusedInput.edit) {
                             exports.focusedInput.edit = {
                                 text: exports.focusedInput.text,
-                                cursor: exports.focusedInput.text.length,
+                                cursor: 0,
                                 lastKeyT: engine_1.lastT,
                                 selection: undefined
                             };
                         }
+                    }
+                    const edit = exports.focusedInput.edit;
+                    const saved = edit.cursor;
+                    edit.lastKeyT = engine_1.lastT;
+                    edit.cursor = mousePositionToCursor(exports.focusedInput, engine_1.mouseX);
+                    if (engine_1.pressedKeys.SHIFT) {
+                        if (!edit.selection) {
+                            edit.selection = {
+                                start: Math.min(saved, edit.cursor),
+                                end: Math.max(saved, edit.cursor)
+                            };
+                        }
+                        else if (edit.cursor < edit.selection.end && (edit.selection.start === saved || edit.cursor <= edit.selection.start)) {
+                            edit.selection.start = edit.cursor;
+                        }
+                        else {
+                            edit.selection.end = edit.cursor;
+                        }
+                        if (edit.selection.start === edit.selection.end) {
+                            edit.selection = undefined;
+                        }
+                    }
+                    else {
+                        edit.selection = undefined;
                     }
                     return true;
                 }
@@ -1097,6 +1133,63 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
             }
         }
         return false;
+    }
+    // TODO: fix me, currently quadratic
+    function mousePositionToCursor(o, mouseX) {
+        const ld = getOrCreateLayout(o);
+        const text = o.edit.text;
+        const x = mouseX - ld.$x - ld.padding.left;
+        let lastMeasure = 0;
+        for (let i = 1; i <= text.length; ++i) {
+            const prefix = text.slice(0, i);
+            const width = engine_1.ctx.measureText(prefix).width;
+            if (width > x) {
+                return x - lastMeasure <= width - x
+                    ? i - 1
+                    : i;
+            }
+            lastMeasure = width;
+        }
+        return x > lastMeasure
+            ? text.length
+            : 0;
+    }
+    function handleMouseMove(_ui) {
+        if (engine_1.clickX === undefined || !exports.focusedInput) {
+            return;
+        }
+        const edit = exports.focusedInput.edit;
+        const saved = edit.cursor;
+        edit.cursor = mousePositionToCursor(exports.focusedInput, engine_1.mouseX);
+        if (edit.cursor === saved) {
+            return;
+        }
+        edit.lastKeyT = engine_1.lastT;
+        if (edit.selection) {
+            if (saved === edit.selection.start) {
+                edit.selection.start = edit.cursor;
+            }
+            else if (saved === edit.selection.end) {
+                edit.selection.end = edit.cursor;
+            }
+            if (edit.selection.end < edit.selection.start) {
+                const tmp = edit.selection.start;
+                edit.selection.start = edit.selection.end;
+                edit.selection.end = tmp;
+            }
+            if (edit.selection.start === edit.selection.end) {
+                edit.selection = undefined;
+            }
+        }
+        else if (saved !== edit.cursor) {
+            edit.selection = {
+                start: Math.min(saved, edit.cursor),
+                end: Math.max(saved, edit.cursor)
+            };
+        }
+        else {
+            edit.selection = undefined;
+        }
     }
     function loseFocus() {
         if (exports.focusedInput?.edit) {
@@ -1206,6 +1299,9 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
     // todo:
     // - history
     // - scrolling
+    // - fix mouse to position, currently quadratic
+    // - cleanup selection management as it's all over the place
+    // - add tests?
     // - mobile support?
     function handleKeyDown(_ui, key) {
         if (!exports.focusedInput || !exports.focusedInput.edit) {
@@ -1469,6 +1565,28 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
                     edit.cursor = edit.cursor + text.length;
                     edit.selection = undefined;
                 });
+                return false;
+            }
+            case 'CTRL+X':
+            case 'META+X': {
+                if (edit.selection) {
+                    const selected = edit.text.slice(edit.selection.start, edit.selection.end);
+                    navigator.clipboard.writeText(selected)
+                        .then(() => {
+                        edit.cursor = edit.selection.start;
+                        edit.text = edit.text.slice(0, edit.selection.start) + edit.text.slice(edit.selection.end);
+                        edit.selection = undefined;
+                    });
+                }
+                return false;
+            }
+            case 'CTRL+A':
+            case 'META+A': {
+                edit.selection = {
+                    start: 0,
+                    end: edit.text.length
+                };
+                edit.cursor = edit.text.length;
                 return false;
             }
             default: {
@@ -2217,6 +2335,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
                         get backgroundColor() { return self === ui_1.focusedInput ? 'floralwhite' : undefined; },
                         get color() { return self === ui_1.focusedInput ? 'black' : 'aliceblue'; },
                         get padding() { return self === ui_1.focusedInput ? '3 2 2 2' : undefined; },
+                        width: 150
                     }
                 };
                 return {
