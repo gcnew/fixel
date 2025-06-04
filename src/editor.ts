@@ -31,9 +31,9 @@ const META_KEY = isMac ? 'META' : 'CTRL';
 
 const KbShortcuts: KbShortcut[] = [
     [onEscape,    'ESC'],
-    [historyUndo, `${META_KEY} + Z`,          true],
-    [historyRedo, `${META_KEY} + SHIFT + Z`,  true],
-    [historyRedo, `CTRL + Y`,                 true],
+    [() => focusedInput ? undefined : historyUndo(), `${META_KEY} + Z`,          true],
+    [() => focusedInput ? undefined : historyRedo(), `${META_KEY} + SHIFT + Z`,  true],
+    [() => focusedInput ? undefined : historyRedo(), `CTRL + Y`,                 true],
 
     [() => displayBoundingBoxes(!displayBoundingBoxes()), ']'],
 ];
@@ -245,6 +245,15 @@ const styles = `
     }
 `;
 
+/*
+TODO:
+ - tile: translate, scale, rotate, alpha, z-index/draw order
+ - same square prevention: none, tile, object
+ - inspector-like interface (i.e. styles and adding UI objects)
+ - prebake complex tiles or the whole map
+ -
+*/
+
 export function setup() {
 
     registerShortcuts(KbShortcuts);
@@ -327,7 +336,7 @@ function handleMouseDraw() {
     const existing = tiles.some(t => t.x === x
                                   && t.y === y
                                   && t.atlas === curAtlas
-                                  && currentTiles!.some(c => t.atlasY === c.x && t.atlasY === c.y));
+                                  && currentTiles!.some(c => t.atlasX === c.x && t.atlasY === c.y));
     if (!existing) {
         const tiles = currentTiles.map<Tile>(t => ({
             x: x + t.dx,
@@ -1079,7 +1088,7 @@ function toTileCoordinates(x: number, y: number) {
 
 function executeAction(action: Action) {
     if (historyIndex !== history.length) {
-        history.splice(historyIndex, history.length - historyIndex)
+        history.splice(historyIndex, history.length - historyIndex);
     }
 
     history.push(action);

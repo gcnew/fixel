@@ -1,7 +1,7 @@
 
 import {
     ctx,
-    lastT, mouseX, mouseY, clickX, clickY, pressedKeys,
+    lastT, mouseX, mouseY, clickX, clickY, pressedKeys, addDebugMsg
 } from './engine'
 
 import { compileStyle } from './mini-css'
@@ -43,6 +43,19 @@ export type EditData = {
         start: number,
         end: number
     },
+    history: HistoryEntry[],
+    historyIndex: number,
+}
+
+export type HistoryEntry = {
+    cursor: number,
+    inserted: string,
+    deleted: string,
+
+    // FEATURE: in a future version can support multiple cursors, which require selection tracking
+    //          the current version is intended to behave lika a classic `<input type=text>` field
+    // selectionStart: number,
+    // selectionEnd: number,
 }
 
 export interface UITextInput extends UIBase<UITextInput> {
@@ -184,6 +197,10 @@ let _clickX: number | undefined;
 
 let mouseDx: number;
 let mouseDy: number;
+
+addDebugMsg(() => { const x = focusedInput?.edit?.historyIndex.toString(); return x && `h-idx: ${x}` });
+addDebugMsg(() => { const x = focusedInput?.edit?.history.length.toString(); return x && `h-len: ${x}` });
+addDebugMsg(() => { const x = focusedInput?.edit?.cursor.toString(); return x && `cursor: ${x}` });
 
 export { accessDisplayBoundingBoxes as displayBoundingBoxes }
 function accessDisplayBoundingBoxes(val?: boolean): boolean {
@@ -837,7 +854,9 @@ function handleMouseDownWorker(ui: UI[]): boolean {
                             text: focusedInput.text,
                             cursor: 0,
                             lastKeyT: lastT,
-                            selection: undefined
+                            selection: undefined,
+                            history: [],
+                            historyIndex: 0
                         };
                     }
                 }
@@ -1080,7 +1099,10 @@ export function handleScrollUI(ui: UI[], deltaX: number, deltaY: number, isWheel
 // - history
 // - scrolling
 // - fix mouse to position, currently quadratic
+// - fix mouse position, try `hellllooo? or slam the bee`
 // - cleanup selection management as it's all over the place
+// - add support for double and tripple click
+// - add support for mouse selection via y up & y down
 // - add tests?
 // - mobile support?
 export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
@@ -1111,7 +1133,6 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
                 edit.selection = {
                     start: 0,
                     end: edit.cursor
-
                 };
             }
 
@@ -1199,9 +1220,12 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
                 const start = edit.selection ? edit.selection.start : edit.cursor;
                 const end = edit.selection ? edit.selection.end : saved;
 
-                edit.text = edit.text.slice(0, start) + edit.text.slice(end);
-                edit.cursor = start;
-                edit.selection = undefined;
+                const patch: HistoryEntry = {
+                    cursor: start,
+                    inserted: '',
+                    deleted: edit.text.slice(start, end)
+                };
+                applyPatch(edit, patch);
             } else if (key.shiftKey) {
                 if (edit.selection) {
                     if (edit.selection.end === saved && edit.cursor >= edit.selection.start) {
@@ -1281,9 +1305,12 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
                 const start = edit.selection ? edit.selection.start : saved;
                 const end = edit.selection ? edit.selection.end : edit.cursor;
 
-                edit.text = edit.text.slice(0, start) + edit.text.slice(end);
-                edit.cursor = start;
-                edit.selection = undefined;
+                const patch: HistoryEntry = {
+                    cursor: start,
+                    inserted: '',
+                    deleted: edit.text.slice(start, end)
+                };
+                applyPatch(edit, patch);
             } else if (key.shiftKey) {
                 if (edit.selection) {
                     if (edit.selection.start === saved && edit.cursor <= edit.selection.end) {
@@ -1307,32 +1334,43 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
         }
 
         case 'META+DELETE': {
-            edit.text = edit.text.slice(0, edit.cursor);
-            edit.selection = undefined;
+            const patch: HistoryEntry = {
+                cursor: edit.cursor,
+                inserted: '',
+                deleted: edit.text.slice(edit.cursor)
+            };
+            applyPatch(edit, patch);
 
             return false;
         }
 
         case 'META+BACKSPACE': {
-            edit.text = edit.text.slice(edit.cursor);
-            edit.cursor = 0;
-            edit.selection = undefined;
+            const patch: HistoryEntry = {
+                cursor: 0,
+                inserted: '',
+                deleted: edit.text.slice(0, edit.cursor)
+            };
+            applyPatch(edit, patch);
 
             return false;
         }
 
         case 'DELETE':
         case 'BACKSPACE': {
-            if (edit.selection) {
-                edit.cursor = edit.selection.start;
-                edit.text = edit.text.slice(0, edit.selection.start) + edit.text.slice(edit.selection.end);
-                edit.selection = undefined;
-            } else if (sigil === 'BACKSPACE' && edit.cursor !== 0) {
-                edit.cursor = edit.cursor - 1;
-                edit.text = edit.text.slice(0, edit.cursor) + edit.text.slice(edit.cursor + 1);
-            } else if (sigil === 'DELETE' && edit.cursor < edit.text.length) {
-                edit.text = edit.text.slice(0, edit.cursor) + edit.text.slice(edit.cursor + 1);
-            }
+
+            const start = edit.selection
+                ? edit.selection.start
+                : (sigil === 'BACKSPACE') ? Math.max(edit.cursor - 1, 0) : edit.cursor;
+            const end = edit.selection
+                ? edit.selection.end
+                : (sigil === 'BACKSPACE') ? edit.cursor : Math.min(edit.cursor + 1, edit.text.length);
+
+            const patch: HistoryEntry = {
+                cursor: start,
+                inserted: '',
+                deleted: edit.text.slice(start, end)
+            };
+            applyPatch(edit, patch);
 
             return false;
         }
@@ -1361,9 +1399,12 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
                     const start = edit.selection ? edit.selection.start : edit.cursor;
                     const end = edit.selection ? edit.selection.end : edit.cursor;
 
-                    edit.text = edit.text.slice(0, start) + text + edit.text.slice(end);
-                    edit.cursor = edit.cursor + text.length;
-                    edit.selection = undefined;
+                    const patch: HistoryEntry = {
+                        cursor: start,
+                        inserted: text,
+                        deleted: edit.text.slice(start, end)
+                    };
+                    applyPatch(edit, patch);
                 });
 
             return false;
@@ -1373,11 +1414,16 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
         case 'META+X': {
             if (edit.selection) {
                 const selected = edit.text.slice(edit.selection.start, edit.selection.end);
-                navigator.clipboard.writeText(selected)
+                const patch: HistoryEntry = {
+                    cursor: edit.selection!.start,
+                    inserted: '',
+                    deleted: selected
+                };
+
+                navigator.clipboard
+                    .writeText(selected)
                     .then(() => {
-                        edit.cursor = edit.selection!.start;
-                        edit.text = edit.text.slice(0, edit.selection!.start) + edit.text.slice(edit.selection!.end);
-                        edit.selection = undefined;
+                        applyPatch(edit, patch);
                     });
             }
 
@@ -1395,20 +1441,84 @@ export function handleKeyDown(_ui: UI[], key: KbKey): boolean {
             return false;
         }
 
+        case 'CTRL+Z':
+        case 'META+Z': {
+            historyUndo(edit);
+            return true;
+        }
+
+        case 'CTRL+Y':
+        case 'CTRL+SHIFT+Z':
+        case 'META+SHIFT+Z': {
+            historyRedo(edit, true);
+            return true;
+        }
+
         default: {
             // accept only characters
             if (key.key.length === 1) {
                 const start = edit.selection ? edit.selection.start : edit.cursor;
                 const end = edit.selection ? edit.selection.end : edit.cursor;
 
-                edit.text = edit.text.slice(0, start) + key.key + edit.text.slice(end);
-                edit.cursor = start + 1;
-                edit.selection = undefined;
+                const patch: HistoryEntry = {
+                    cursor: start,
+                    inserted: key.key,
+                    deleted: edit.text.slice(start, end)
+                };
+                applyPatch(edit, patch);
             }
 
             return false;
         }
     }
+}
+
+function applyPatch(edit: EditData, patch: HistoryEntry) {
+    // do not accummulate empty patches
+    if (patch.inserted.length === 0 && patch.deleted.length === 0) {
+        return;
+    }
+
+    if (edit.historyIndex !== edit.history.length) {
+        edit.history.length = edit.historyIndex;
+    }
+
+    edit.history.push(patch);
+    historyRedo(edit, false);
+}
+
+function historyUndo(edit: EditData) {
+    if (edit.historyIndex === 0) {
+        return;
+    }
+
+    const patch = edit.history[--edit.historyIndex]!;
+
+    edit.cursor = patch.cursor;
+    edit.text = edit.text.slice(0, edit.cursor) + patch.deleted + edit.text.slice(edit.cursor + patch.inserted.length);
+    edit.cursor += patch.deleted.length;
+    edit.selection = {
+        start: edit.cursor - patch.deleted.length,
+        end: edit.cursor
+    };
+}
+
+function historyRedo(edit: EditData, selectInserted: boolean) {
+    if (edit.historyIndex === edit.history.length) {
+        return;
+    }
+
+    const patch = edit.history[edit.historyIndex++]!;
+
+    edit.cursor = patch.cursor;
+    edit.text = edit.text.slice(0, edit.cursor) + patch.inserted + edit.text.slice(edit.cursor + patch.deleted.length);
+    edit.cursor += patch.inserted.length;
+    edit.selection = selectInserted
+        ? {
+            start: edit.cursor - patch.inserted.length,
+            end: edit.cursor
+        }
+        : undefined;
 }
 
 export function debugBoundingBox(ui: UI[]) {
