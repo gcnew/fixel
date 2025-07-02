@@ -1485,6 +1485,7 @@ function applyPatch(edit: EditData, patch: HistoryEntry) {
 
     edit.history.push(patch);
     historyRedo(edit, false);
+    historyAggregate(edit);
 }
 
 function historyUndo(edit: EditData) {
@@ -1519,6 +1520,53 @@ function historyRedo(edit: EditData, selectInserted: boolean) {
             end: edit.cursor
         }
         : undefined;
+}
+
+// Logic:
+//  - aggergation is currently done only for the last 2 entries, a possible improvement can be time based aggregation of old entries
+//  - when space (any whitespace) is encountered a new history entry is started
+//  - deletions also starts a new entry, but multiple deletions should be aggregated
+//  - copy pasting is aggregated (this is not the case in the browser)
+//  - take notice of the cursor position, i.e. if the cursor position is not adjacent to the last edit no aggregation should take place
+function historyAggregate(edit: EditData) {
+    if (edit.historyIndex !== edit.history.length || edit.history.length < 2) {
+        return;
+    }
+
+    const curr = edit.history[edit.history.length - 1]!;
+
+    // if the last record contains deletions, the inserted text is whitespace or is copy/paste - start a new aggregation entry
+    if (curr.deleted || /^\s+$/.test(curr.inserted) || isMultiChar(curr.inserted)) {
+        return;
+    }
+
+    const acc = edit.history[edit.history.length - 2]!;
+    if (acc.cursor + acc.inserted.length !== curr.cursor) {
+        // the cursor has moved, create a new entry
+        return;
+    }
+
+    edit.history.pop();
+    edit.historyIndex -= 1;
+
+    edit.history[edit.history.length - 1] = {
+        cursor: acc.cursor,
+        inserted: acc.inserted + curr.inserted,
+        deleted: curr.deleted + acc.deleted,
+    };
+}
+
+function isMultiChar(s: string) {
+    let idx = 0;
+
+    for (const _ of s) {
+        idx++;
+        if (idx > 1) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 export function debugBoundingBox(ui: UI[]) {
