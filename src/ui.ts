@@ -1,7 +1,7 @@
 
 import {
     ctx,
-    lastT, mouseX, mouseY, clickX, clickY, pressedKeys, addDebugMsg
+    lastT, mouseX, mouseY, clickX, clickY, pressedKeys, addDebugMsg, width as engineWidth
 } from './engine'
 
 import { compileStyle } from './mini-css'
@@ -201,6 +201,8 @@ let mouseDy: number;
 addDebugMsg(() => { const x = focusedInput?.edit?.historyIndex.toString(); return x && `h-idx: ${x}` });
 addDebugMsg(() => { const x = focusedInput?.edit?.history.length.toString(); return x && `h-len: ${x}` });
 addDebugMsg(() => { const x = focusedInput?.edit?.cursor.toString(); return x && `cursor: ${x}` });
+addDebugMsg(() => { const x = focusedInput?.edit?.selection; return x && `s:${x.start} e:${x.end}` });
+addDebugMsg(() => { /* fake... */ drawDebugHistory(); return undefined; });
 
 export { accessDisplayBoundingBoxes as displayBoundingBoxes }
 function accessDisplayBoundingBoxes(val?: boolean): boolean {
@@ -243,6 +245,22 @@ function layoutDraw(ui: UI[]) {
     }
 
     ctx.textBaseline = baseline;
+}
+
+function drawDebugHistory() {
+    const edit = focusedInput?.edit;
+    if (!edit) {
+        return;
+    }
+
+    ctx.fillStyle = 'darkred';
+    ctx.font = '10px monospace';
+    for (let i = edit.history.length - 1; i >= 0; --i) {
+        const patch = edit.history[i]!;
+        const msg = `c:${patch.cursor} i:${patch.inserted} d:${patch.deleted}`;
+
+        ctx.fillText(msg, engineWidth - 150, (i + 10) * 10);
+    }
 }
 
 function beforeDraw(ui: UI[]) {
@@ -1502,6 +1520,10 @@ function historyUndo(edit: EditData) {
         start: edit.cursor - patch.deleted.length,
         end: edit.cursor
     };
+
+    if (edit.selection?.start === edit.selection?.end) {
+        edit.selection = undefined;
+    }
 }
 
 function historyRedo(edit: EditData, selectInserted: boolean) {
@@ -1520,6 +1542,11 @@ function historyRedo(edit: EditData, selectInserted: boolean) {
             end: edit.cursor
         }
         : undefined;
+
+    // could simply check for `patch.inserted.length === 0` but I'll probably break it while refactoring (also applies to Undo)
+    if (edit.selection?.start === edit.selection?.end) {
+        edit.selection = undefined;
+    }
 }
 
 // Logic:
@@ -1535,14 +1562,23 @@ function historyAggregate(edit: EditData) {
 
     const curr = edit.history[edit.history.length - 1]!;
 
-    // if the last record contains deletions, the inserted text is whitespace or is copy/paste - start a new aggregation entry
-    if (curr.deleted || /^\s+$/.test(curr.inserted) || isMultiChar(curr.inserted)) {
+    // start a new aggregation entry if the inserted text is whitespace
+    if (/^\s+$/.test(curr.inserted)) {
         return;
     }
 
     const acc = edit.history[edit.history.length - 2]!;
-    if (acc.cursor + acc.inserted.length !== curr.cursor) {
-        // the cursor has moved, create a new entry
+
+    // the cursor has moved, create a new entry
+    if (acc.cursor + acc.inserted.length !== curr.cursor + curr.deleted.length) {
+        return;
+    }
+
+    // start a new entry when the mode of operation changes
+    if (acc.deleted && !acc.inserted && curr.inserted) {
+        return;
+    }
+    if (curr.deleted && acc.inserted) {
         return;
     }
 
@@ -1550,23 +1586,10 @@ function historyAggregate(edit: EditData) {
     edit.historyIndex -= 1;
 
     edit.history[edit.history.length - 1] = {
-        cursor: acc.cursor,
+        cursor: curr.deleted ? curr.cursor : acc.cursor,
         inserted: acc.inserted + curr.inserted,
         deleted: curr.deleted + acc.deleted,
     };
-}
-
-function isMultiChar(s: string) {
-    let idx = 0;
-
-    for (const _ of s) {
-        idx++;
-        if (idx > 1) {
-            return true;
-        }
-    }
-
-    return false;
 }
 
 export function debugBoundingBox(ui: UI[]) {
