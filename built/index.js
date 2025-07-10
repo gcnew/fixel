@@ -580,6 +580,11 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
     let _clickX;
     let mouseDx;
     let mouseDy;
+    (0, engine_1.addDebugMsg)(() => { const x = exports.focusedInput?.edit?.historyIndex.toString(); return x && `h-idx: ${x}`; });
+    (0, engine_1.addDebugMsg)(() => { const x = exports.focusedInput?.edit?.history.length.toString(); return x && `h-len: ${x}`; });
+    (0, engine_1.addDebugMsg)(() => { const x = exports.focusedInput?.edit?.cursor.toString(); return x && `cursor: ${x}`; });
+    (0, engine_1.addDebugMsg)(() => { const x = exports.focusedInput?.edit?.selection; return x && `s:${x.start} e:${x.end}`; });
+    (0, engine_1.addDebugMsg)(() => { /* fake... */ drawDebugHistory(); return undefined; });
     function accessDisplayBoundingBoxes(val) {
         if (typeof val === 'boolean') {
             displayBoundingBoxes = val;
@@ -614,6 +619,19 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
         engine_1.ctx.textBaseline = baseline;
     }
     exports.drawUI = layoutDraw;
+    function drawDebugHistory() {
+        const edit = exports.focusedInput?.edit;
+        if (!edit) {
+            return;
+        }
+        engine_1.ctx.fillStyle = 'darkred';
+        engine_1.ctx.font = '10px monospace';
+        for (let i = edit.history.length - 1; i >= 0; --i) {
+            const patch = edit.history[i];
+            const msg = `c:${patch.cursor} i:${patch.inserted} d:${patch.deleted}`;
+            engine_1.ctx.fillText(msg, engine_1.width - 150, (i + 10) * 10);
+        }
+    }
     function beforeDraw(ui) {
         mouseDx = _mouseX - engine_1.mouseX;
         mouseDy = _mouseY - engine_1.mouseY;
@@ -1090,7 +1108,9 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
                                 text: exports.focusedInput.text,
                                 cursor: 0,
                                 lastKeyT: engine_1.lastT,
-                                selection: undefined
+                                selection: undefined,
+                                history: [],
+                                historyIndex: 0
                             };
                         }
                     }
@@ -1300,7 +1320,10 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
     // - history
     // - scrolling
     // - fix mouse to position, currently quadratic
+    // - fix mouse position, try `hellllooo? or slam the bee`
     // - cleanup selection management as it's all over the place
+    // - add support for double and tripple click
+    // - add support for mouse selection via y up & y down
     // - add tests?
     // - mobile support?
     function handleKeyDown(_ui, key) {
@@ -1407,9 +1430,12 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
                 if (keyboard_2.KeyMap[key.code] === 'BACKSPACE') {
                     const start = edit.selection ? edit.selection.start : edit.cursor;
                     const end = edit.selection ? edit.selection.end : saved;
-                    edit.text = edit.text.slice(0, start) + edit.text.slice(end);
-                    edit.cursor = start;
-                    edit.selection = undefined;
+                    const patch = {
+                        cursor: start,
+                        inserted: '',
+                        deleted: edit.text.slice(start, end)
+                    };
+                    applyPatch(edit, patch);
                 }
                 else if (key.shiftKey) {
                     if (edit.selection) {
@@ -1486,9 +1512,12 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
                 if (keyboard_2.KeyMap[key.code] === 'DELETE') {
                     const start = edit.selection ? edit.selection.start : saved;
                     const end = edit.selection ? edit.selection.end : edit.cursor;
-                    edit.text = edit.text.slice(0, start) + edit.text.slice(end);
-                    edit.cursor = start;
-                    edit.selection = undefined;
+                    const patch = {
+                        cursor: start,
+                        inserted: '',
+                        deleted: edit.text.slice(start, end)
+                    };
+                    applyPatch(edit, patch);
                 }
                 else if (key.shiftKey) {
                     if (edit.selection) {
@@ -1514,30 +1543,37 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
                 return false;
             }
             case 'META+DELETE': {
-                edit.text = edit.text.slice(0, edit.cursor);
-                edit.selection = undefined;
+                const patch = {
+                    cursor: edit.cursor,
+                    inserted: '',
+                    deleted: edit.text.slice(edit.cursor)
+                };
+                applyPatch(edit, patch);
                 return false;
             }
             case 'META+BACKSPACE': {
-                edit.text = edit.text.slice(edit.cursor);
-                edit.cursor = 0;
-                edit.selection = undefined;
+                const patch = {
+                    cursor: 0,
+                    inserted: '',
+                    deleted: edit.text.slice(0, edit.cursor)
+                };
+                applyPatch(edit, patch);
                 return false;
             }
             case 'DELETE':
             case 'BACKSPACE': {
-                if (edit.selection) {
-                    edit.cursor = edit.selection.start;
-                    edit.text = edit.text.slice(0, edit.selection.start) + edit.text.slice(edit.selection.end);
-                    edit.selection = undefined;
-                }
-                else if (sigil === 'BACKSPACE' && edit.cursor !== 0) {
-                    edit.cursor = edit.cursor - 1;
-                    edit.text = edit.text.slice(0, edit.cursor) + edit.text.slice(edit.cursor + 1);
-                }
-                else if (sigil === 'DELETE' && edit.cursor < edit.text.length) {
-                    edit.text = edit.text.slice(0, edit.cursor) + edit.text.slice(edit.cursor + 1);
-                }
+                const start = edit.selection
+                    ? edit.selection.start
+                    : (sigil === 'BACKSPACE') ? Math.max(edit.cursor - 1, 0) : edit.cursor;
+                const end = edit.selection
+                    ? edit.selection.end
+                    : (sigil === 'BACKSPACE') ? edit.cursor : Math.min(edit.cursor + 1, edit.text.length);
+                const patch = {
+                    cursor: start,
+                    inserted: '',
+                    deleted: edit.text.slice(start, end)
+                };
+                applyPatch(edit, patch);
                 return false;
             }
             case 'ESC': {
@@ -1561,9 +1597,12 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
                     .then(text => {
                     const start = edit.selection ? edit.selection.start : edit.cursor;
                     const end = edit.selection ? edit.selection.end : edit.cursor;
-                    edit.text = edit.text.slice(0, start) + text + edit.text.slice(end);
-                    edit.cursor = edit.cursor + text.length;
-                    edit.selection = undefined;
+                    const patch = {
+                        cursor: start,
+                        inserted: text,
+                        deleted: edit.text.slice(start, end)
+                    };
+                    applyPatch(edit, patch);
                 });
                 return false;
             }
@@ -1571,11 +1610,15 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
             case 'META+X': {
                 if (edit.selection) {
                     const selected = edit.text.slice(edit.selection.start, edit.selection.end);
-                    navigator.clipboard.writeText(selected)
+                    const patch = {
+                        cursor: edit.selection.start,
+                        inserted: '',
+                        deleted: selected
+                    };
+                    navigator.clipboard
+                        .writeText(selected)
                         .then(() => {
-                        edit.cursor = edit.selection.start;
-                        edit.text = edit.text.slice(0, edit.selection.start) + edit.text.slice(edit.selection.end);
-                        edit.selection = undefined;
+                        applyPatch(edit, patch);
                     });
                 }
                 return false;
@@ -1589,20 +1632,116 @@ define("ui", ["require", "exports", "engine", "mini-css", "keyboard", "util"], f
                 edit.cursor = edit.text.length;
                 return false;
             }
+            case 'CTRL+Z':
+            case 'META+Z': {
+                historyUndo(edit);
+                return true;
+            }
+            case 'CTRL+Y':
+            case 'CTRL+SHIFT+Z':
+            case 'META+SHIFT+Z': {
+                historyRedo(edit, true);
+                return true;
+            }
             default: {
                 // accept only characters
                 if (key.key.length === 1) {
                     const start = edit.selection ? edit.selection.start : edit.cursor;
                     const end = edit.selection ? edit.selection.end : edit.cursor;
-                    edit.text = edit.text.slice(0, start) + key.key + edit.text.slice(end);
-                    edit.cursor = start + 1;
-                    edit.selection = undefined;
+                    const patch = {
+                        cursor: start,
+                        inserted: key.key,
+                        deleted: edit.text.slice(start, end)
+                    };
+                    applyPatch(edit, patch);
                 }
                 return false;
             }
         }
     }
     exports.handleKeyDown = handleKeyDown;
+    function applyPatch(edit, patch) {
+        // do not accummulate empty patches
+        if (patch.inserted.length === 0 && patch.deleted.length === 0) {
+            return;
+        }
+        if (edit.historyIndex !== edit.history.length) {
+            edit.history.length = edit.historyIndex;
+        }
+        edit.history.push(patch);
+        historyRedo(edit, false);
+        historyAggregate(edit);
+    }
+    function historyUndo(edit) {
+        if (edit.historyIndex === 0) {
+            return;
+        }
+        const patch = edit.history[--edit.historyIndex];
+        edit.cursor = patch.cursor;
+        edit.text = edit.text.slice(0, edit.cursor) + patch.deleted + edit.text.slice(edit.cursor + patch.inserted.length);
+        edit.cursor += patch.deleted.length;
+        edit.selection = {
+            start: edit.cursor - patch.deleted.length,
+            end: edit.cursor
+        };
+        if (edit.selection?.start === edit.selection?.end) {
+            edit.selection = undefined;
+        }
+    }
+    function historyRedo(edit, selectInserted) {
+        if (edit.historyIndex === edit.history.length) {
+            return;
+        }
+        const patch = edit.history[edit.historyIndex++];
+        edit.cursor = patch.cursor;
+        edit.text = edit.text.slice(0, edit.cursor) + patch.inserted + edit.text.slice(edit.cursor + patch.deleted.length);
+        edit.cursor += patch.inserted.length;
+        edit.selection = selectInserted
+            ? {
+                start: edit.cursor - patch.inserted.length,
+                end: edit.cursor
+            }
+            : undefined;
+        // could simply check for `patch.inserted.length === 0` but I'll probably break it while refactoring (also applies to Undo)
+        if (edit.selection?.start === edit.selection?.end) {
+            edit.selection = undefined;
+        }
+    }
+    // Logic:
+    //  - aggergation is currently done only for the last 2 entries, a possible improvement can be time based aggregation of old entries
+    //  - when space (any whitespace) is encountered a new history entry is started
+    //  - deletions also starts a new entry, but multiple deletions should be aggregated
+    //  - copy pasting is aggregated (this is not the case in the browser)
+    //  - take notice of the cursor position, i.e. if the cursor position is not adjacent to the last edit no aggregation should take place
+    function historyAggregate(edit) {
+        if (edit.historyIndex !== edit.history.length || edit.history.length < 2) {
+            return;
+        }
+        const curr = edit.history[edit.history.length - 1];
+        // start a new aggregation entry if the inserted text is whitespace
+        if (/^\s+$/.test(curr.inserted)) {
+            return;
+        }
+        const acc = edit.history[edit.history.length - 2];
+        // the cursor has moved, create a new entry
+        if (acc.cursor + acc.inserted.length !== curr.cursor + curr.deleted.length) {
+            return;
+        }
+        // start a new entry when the mode of operation changes
+        if (acc.deleted && !acc.inserted && curr.inserted) {
+            return;
+        }
+        if (curr.deleted && acc.inserted) {
+            return;
+        }
+        edit.history.pop();
+        edit.historyIndex -= 1;
+        edit.history[edit.history.length - 1] = {
+            cursor: curr.deleted ? curr.cursor : acc.cursor,
+            inserted: acc.inserted + curr.inserted,
+            deleted: curr.deleted + acc.deleted,
+        };
+    }
     function debugBoundingBox(ui) {
         const lds = ui.map(getOrCreateLayout);
         const x = Math.min(...lds.map(o => o.$x));
@@ -1620,9 +1759,9 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
     const META_KEY = engine_2.isMac ? 'META' : 'CTRL';
     const KbShortcuts = [
         [onEscape, 'ESC'],
-        [historyUndo, `${META_KEY} + Z`, true],
-        [historyRedo, `${META_KEY} + SHIFT + Z`, true],
-        [historyRedo, `CTRL + Y`, true],
+        [() => ui_1.focusedInput ? undefined : historyUndo(), `${META_KEY} + Z`, true],
+        [() => ui_1.focusedInput ? undefined : historyRedo(), `${META_KEY} + SHIFT + Z`, true],
+        [() => ui_1.focusedInput ? undefined : historyRedo(), `CTRL + Y`, true],
         [() => (0, ui_1.displayBoundingBoxes)(!(0, ui_1.displayBoundingBoxes)()), ']'],
     ];
     const atlasPaths = [
@@ -1814,6 +1953,14 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         color: 'floralwhite';
     }
 `;
+    /*
+    TODO:
+     - tile: translate, scale, rotate, alpha, z-index/draw order
+     - same square prevention: none, tile, object
+     - inspector-like interface (i.e. styles and adding UI objects)
+     - prebake complex tiles or the whole map
+     -
+    */
     function setup() {
         (0, engine_2.registerShortcuts)(KbShortcuts);
         (0, engine_2.listen)('mouseup', onMouseUp);
@@ -1876,7 +2023,7 @@ define("editor", ["require", "exports", "engine", "util", "ui"], function (requi
         const existing = tiles.some(t => t.x === x
             && t.y === y
             && t.atlas === curAtlas
-            && currentTiles.some(c => t.atlasY === c.x && t.atlasY === c.y));
+            && currentTiles.some(c => t.atlasX === c.x && t.atlasY === c.y));
         if (!existing) {
             const tiles = currentTiles.map(t => ({
                 x: x + t.dx,
