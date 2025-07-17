@@ -307,8 +307,8 @@ function calcTextBox(o: UIText) {
     const ld = getOrCreateLayout(o);
 
     ctx.font = ld.font;
-
     const dims = ctx.measureText(o.text);
+
     ld.textMetrics = dims;
     ld.$w = ld.style?.width ?? (dims.width + ld.padding.left + ld.padding.right);
     ld.$h = ld.style?.height ?? (dims.fontBoundingBoxDescent + ld.padding.top + ld.padding.bottom);
@@ -322,10 +322,11 @@ function calcTextInputBox(o: UITextInput) {
         focusedInput = o;
     }
 
-    ctx.font = ld.font;
-
     const text = o.edit?.text ?? o.text;
+
+    ctx.font = ld.font;
     const dims = ctx.measureText(text);
+
     ld.textMetrics = dims;
     ld.$w = ld.style?.width ?? (dims.width + ld.padding.left + ld.padding.right);
     ld.$h = ld.style?.height ?? (dims.fontBoundingBoxDescent + ld.padding.top + ld.padding.bottom);
@@ -501,6 +502,8 @@ function drawTextInput(o: UITextInput) {
 
     if (o === focusedInput && o.edit?.selection) {
         const prefix = o.edit.text.slice(0, o.edit.selection.start);
+
+        ctx.font = ld.font;
         const offset = ctx.measureText(prefix).width;
 
         const selected = o.edit.text.slice(o.edit.selection.start, o.edit.selection.end);
@@ -520,6 +523,7 @@ function drawTextInput(o: UITextInput) {
     ctx.font = ld.font;
     ctx.fillText(text, ld.$x + ld.padding.left, ld.$y + ld.padding.top);
 
+    // draw the caret if focused
     if (o === focusedInput && o.edit) {
         const prefix = o.edit.text.slice(0, o.edit.cursor);
         const offset = ctx.measureText(prefix).width;
@@ -932,6 +936,9 @@ function mousePositionToCursor(o: UITextInput, mouseX: number) {
     const text = o.edit!.text;
     const x = mouseX - ld.$x - ld.padding.left;
 
+    // set the appropriate font
+    ctx.font = ld.font;
+
     let lastMeasure = 0;
     for (let i = 1; i <= text.length; ++i) {
         const prefix = text.slice(0, i);
@@ -1114,10 +1121,8 @@ export function handleScrollUI(ui: UI[], deltaX: number, deltaY: number, isWheel
 }
 
 // todo:
-// - history
 // - scrolling
 // - fix mouse to position, currently quadratic
-// - fix mouse position, try `hellllooo? or slam the bee`
 // - cleanup selection management as it's all over the place
 // - add support for double and tripple click
 // - add support for mouse selection via y up & y down
